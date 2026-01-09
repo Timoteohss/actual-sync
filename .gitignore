@@ -1,0 +1,65 @@
+# Build outputs
+build/
+out/
+*.class
+*.jar
+*.war
+*.aar
+
+# Gradle
+.gradle/
+gradle-app.setting
+!gradle-wrapper.jar
+!gradle-wrapper.properties
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.swp
+*.swo
+*~
+
+# Kotlin
+*.kotlin_module
+
+# Android
+local.properties
+*.apk
+*.ap_
+
+# iOS
+*.xcworkspace
+*.xcuserdata
+Pods/
+DerivedData/
+
+# SQLite databases (generated during testing)
+*.db
+*.sqlite
+*.sqlite3
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment and secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Dart/Flutter
+dart/.dart_tool/
+dart/.packages
+dart/pubspec.lock
+dart/build/
+
+# Test outputs
+test-results/
+coverage/

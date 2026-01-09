@@ -1,0 +1,299 @@
+-- Accounts table
+CREATE TABLE accounts (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    offbudget INTEGER NOT NULL DEFAULT 0,
+    closed INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    tombstone INTEGER NOT NULL DEFAULT 0
+);
+
+-- Payees table
+CREATE TABLE payees (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    category TEXT,
+    tombstone INTEGER NOT NULL DEFAULT 0
+);
+
+-- Payee mapping rules
+CREATE TABLE payee_mapping (
+    id TEXT PRIMARY KEY NOT NULL,
+    targetId TEXT NOT NULL,
+    tombstone INTEGER NOT NULL DEFAULT 0
+);
+
+-- Category groups
+CREATE TABLE category_groups (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    is_income INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    hidden INTEGER NOT NULL DEFAULT 0,
+    tombstone INTEGER NOT NULL DEFAULT 0
+);
+
+-- Categories
+CREATE TABLE categories (
+    id TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    cat_group TEXT,
+    is_income INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    hidden INTEGER NOT NULL DEFAULT 0,
+    tombstone INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (cat_group) REFERENCES category_groups(id)
+);
+
+-- Transactions
+CREATE TABLE transactions (
+    id TEXT PRIMARY KEY NOT NULL,
+    acct TEXT,
+    category TEXT,
+    amount INTEGER NOT NULL DEFAULT 0,
+    payee TEXT,
+    notes TEXT,
+    date INTEGER,
+    financial_id TEXT,
+    type TEXT,
+    cleared INTEGER NOT NULL DEFAULT 0,
+    reconciled INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    starting_balance_flag INTEGER NOT NULL DEFAULT 0,
+    transferred_id TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    tombstone INTEGER NOT NULL DEFAULT 0,
+    schedule TEXT,
+    parent_id TEXT,
+    is_parent INTEGER NOT NULL DEFAULT 0,
+    is_child INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (acct) REFERENCES accounts(id),
+    FOREIGN KEY (category) REFERENCES categories(id),
+    FOREIGN KEY (payee) REFERENCES payees(id)
+);
+
+-- Monthly budget amounts
+CREATE TABLE zero_budgets (
+    id TEXT PRIMARY KEY NOT NULL,
+    month INTEGER NOT NULL,
+    category TEXT NOT NULL,
+    amount INTEGER NOT NULL DEFAULT 0,
+    carryover INTEGER NOT NULL DEFAULT 0,
+    goal INTEGER,
+    tombstone INTEGER NOT NULL DEFAULT 0
+);
+
+-- Notes (for accounts, categories, etc.)
+CREATE TABLE notes (
+    id TEXT PRIMARY KEY NOT NULL,
+    note TEXT NOT NULL DEFAULT ''
+);
+
+-- Schedules for recurring transactions
+CREATE TABLE schedules (
+    id TEXT PRIMARY KEY NOT NULL,
+    rule TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    completed INTEGER NOT NULL DEFAULT 0,
+    posts_transaction INTEGER NOT NULL DEFAULT 0,
+    tombstone INTEGER NOT NULL DEFAULT 0,
+    name TEXT
+);
+
+-- Schedule-transaction link
+CREATE TABLE schedule_next_date (
+    id TEXT PRIMARY KEY NOT NULL,
+    schedule_id TEXT NOT NULL,
+    local_next_date INTEGER,
+    local_next_date_ts INTEGER,
+    base_next_date INTEGER,
+    base_next_date_ts INTEGER,
+    tombstone INTEGER NOT NULL DEFAULT 0
+);
+
+-- Rules for auto-categorization
+CREATE TABLE rules (
+    id TEXT PRIMARY KEY NOT NULL,
+    stage TEXT,
+    conditions TEXT,
+    actions TEXT,
+    tombstone INTEGER NOT NULL DEFAULT 0
+);
+
+-- CRDT messages log (for sync)
+CREATE TABLE messages_crdt (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT NOT NULL UNIQUE,
+    dataset TEXT NOT NULL,
+    row_id TEXT NOT NULL,
+    column_name TEXT NOT NULL,
+    value TEXT NOT NULL,
+    applied INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX messages_crdt_timestamp ON messages_crdt(timestamp);
+CREATE INDEX messages_crdt_applied ON messages_crdt(applied);
+
+-- Sync metadata
+CREATE TABLE sync_metadata (
+    key TEXT PRIMARY KEY NOT NULL,
+    value TEXT
+);
+
+-- ============= QUERIES =============
+
+-- Accounts
+getAccounts:
+SELECT * FROM accounts WHERE tombstone = 0 ORDER BY sort_order;
+
+getAccountById:
+SELECT * FROM accounts WHERE id = ?;
+
+insertAccount:
+INSERT OR REPLACE INTO accounts(id, name, offbudget, closed, sort_order, tombstone)
+VALUES (?, ?, ?, ?, ?, ?);
+
+-- Payees
+getPayees:
+SELECT * FROM payees WHERE tombstone = 0 ORDER BY name;
+
+getPayeeById:
+SELECT * FROM payees WHERE id = ?;
+
+insertPayee:
+INSERT OR REPLACE INTO payees(id, name, category, tombstone)
+VALUES (?, ?, ?, ?);
+
+-- Category Groups
+getCategoryGroups:
+SELECT * FROM category_groups WHERE tombstone = 0 ORDER BY sort_order;
+
+getCategoryGroupById:
+SELECT * FROM category_groups WHERE id = ?;
+
+insertCategoryGroup:
+INSERT OR REPLACE INTO category_groups(id, name, is_income, sort_order, hidden, tombstone)
+VALUES (?, ?, ?, ?, ?, ?);
+
+-- Categories
+getCategories:
+SELECT * FROM categories WHERE tombstone = 0 ORDER BY sort_order;
+
+getCategoriesByGroup:
+SELECT * FROM categories WHERE cat_group = ? AND tombstone = 0 ORDER BY sort_order;
+
+getCategoryById:
+SELECT * FROM categories WHERE id = ?;
+
+insertCategory:
+INSERT OR REPLACE INTO categories(id, name, cat_group, is_income, sort_order, hidden, tombstone)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+-- Transactions
+getTransactionsByAccount:
+SELECT * FROM transactions WHERE acct = ? AND tombstone = 0 ORDER BY date DESC, sort_order DESC;
+
+getTransactionsByDateRange:
+SELECT * FROM transactions WHERE date >= ? AND date <= ? AND tombstone = 0 ORDER BY date DESC, sort_order DESC;
+
+getTransactionById:
+SELECT * FROM transactions WHERE id = ?;
+
+insertTransaction:
+INSERT OR REPLACE INTO transactions(id, acct, category, amount, payee, notes, date, financial_id, type, cleared, reconciled, error, starting_balance_flag, transferred_id, sort_order, tombstone, schedule, parent_id, is_parent, is_child)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+-- Budget
+getBudgetForMonth:
+SELECT * FROM zero_budgets WHERE month = ? AND tombstone = 0;
+
+getBudgetForCategory:
+SELECT * FROM zero_budgets WHERE category = ? AND tombstone = 0;
+
+insertBudget:
+INSERT OR REPLACE INTO zero_budgets(id, month, category, amount, carryover, goal, tombstone)
+VALUES (?, ?, ?, ?, ?, ?, ?);
+
+-- CRDT Messages
+insertMessage:
+INSERT OR IGNORE INTO messages_crdt(timestamp, dataset, row_id, column_name, value, applied)
+VALUES (?, ?, ?, ?, ?, ?);
+
+getUnappliedMessages:
+SELECT * FROM messages_crdt WHERE applied = 0 ORDER BY timestamp;
+
+markMessageApplied:
+UPDATE messages_crdt SET applied = 1 WHERE timestamp = ?;
+
+getMessagesSince:
+SELECT * FROM messages_crdt WHERE timestamp > ? ORDER BY timestamp;
+
+messageExists:
+SELECT COUNT(*) AS cnt FROM messages_crdt WHERE timestamp = ?;
+
+getLastTimestamp:
+SELECT MAX(timestamp) AS last_ts FROM messages_crdt;
+
+-- Sync Metadata
+getSyncMetadata:
+SELECT value FROM sync_metadata WHERE key = ?;
+
+setSyncMetadata:
+INSERT OR REPLACE INTO sync_metadata(key, value) VALUES (?, ?);
+
+-- Generic row operations for CRDT apply
+updateAccountColumn:
+UPDATE accounts SET name = CASE WHEN ?1 = 'name' THEN ?3 ELSE name END,
+                    offbudget = CASE WHEN ?1 = 'offbudget' THEN ?3 ELSE offbudget END,
+                    closed = CASE WHEN ?1 = 'closed' THEN ?3 ELSE closed END,
+                    sort_order = CASE WHEN ?1 = 'sort_order' THEN ?3 ELSE sort_order END,
+                    tombstone = CASE WHEN ?1 = 'tombstone' THEN ?3 ELSE tombstone END
+WHERE id = ?2;
+
+updatePayeeColumn:
+UPDATE payees SET name = CASE WHEN ?1 = 'name' THEN ?3 ELSE name END,
+                  category = CASE WHEN ?1 = 'category' THEN ?3 ELSE category END,
+                  tombstone = CASE WHEN ?1 = 'tombstone' THEN ?3 ELSE tombstone END
+WHERE id = ?2;
+
+updateCategoryColumn:
+UPDATE categories SET name = CASE WHEN ?1 = 'name' THEN ?3 ELSE name END,
+                      cat_group = CASE WHEN ?1 = 'cat_group' THEN ?3 ELSE cat_group END,
+                      is_income = CASE WHEN ?1 = 'is_income' THEN ?3 ELSE is_income END,
+                      sort_order = CASE WHEN ?1 = 'sort_order' THEN ?3 ELSE sort_order END,
+                      hidden = CASE WHEN ?1 = 'hidden' THEN ?3 ELSE hidden END,
+                      tombstone = CASE WHEN ?1 = 'tombstone' THEN ?3 ELSE tombstone END
+WHERE id = ?2;
+
+updateCategoryGroupColumn:
+UPDATE category_groups SET name = CASE WHEN ?1 = 'name' THEN ?3 ELSE name END,
+                           is_income = CASE WHEN ?1 = 'is_income' THEN ?3 ELSE is_income END,
+                           sort_order = CASE WHEN ?1 = 'sort_order' THEN ?3 ELSE sort_order END,
+                           hidden = CASE WHEN ?1 = 'hidden' THEN ?3 ELSE hidden END,
+                           tombstone = CASE WHEN ?1 = 'tombstone' THEN ?3 ELSE tombstone END
+WHERE id = ?2;
+
+-- Clear all data (for reset)
+clearAccounts:
+DELETE FROM accounts;
+
+clearPayees:
+DELETE FROM payees;
+
+clearCategories:
+DELETE FROM categories;
+
+clearCategoryGroups:
+DELETE FROM category_groups;
+
+clearTransactions:
+DELETE FROM transactions;
+
+clearBudgets:
+DELETE FROM zero_budgets;
+
+clearMessages:
+DELETE FROM messages_crdt;
+
+clearMetadata:
+DELETE FROM sync_metadata;
