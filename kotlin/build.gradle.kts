@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
+
 plugins {
     kotlin("multiplatform") version "2.1.0"
     kotlin("plugin.serialization") version "2.1.0"
@@ -21,15 +23,18 @@ kotlin {
         publishLibraryVariants("release", "debug")
     }
 
-    // iOS targets
+    // iOS targets with XCFramework support
+    val xcf = XCFramework("ActualSync")
+    // Only build arm64 for faster iteration (real device only)
     listOf(
-        iosX64(),
-        iosArm64(),
-        iosSimulatorArm64()
+        // iosX64(),  // Simulator Intel - disabled for faster builds
+        iosArm64()
+        // iosSimulatorArm64()  // Simulator Apple Silicon - disabled for faster builds
     ).forEach {
         it.binaries.framework {
             baseName = "ActualSync"
             isStatic = true
+            xcf.add(this)
         }
     }
 
@@ -78,14 +83,14 @@ kotlin {
             implementation("app.cash.sqldelight:android-driver:2.0.2")
         }
 
-        val iosX64Main by getting
+        // val iosX64Main by getting  // Disabled for faster builds
         val iosArm64Main by getting
-        val iosSimulatorArm64Main by getting
+        // val iosSimulatorArm64Main by getting  // Disabled for faster builds
         val iosMain by creating {
             dependsOn(commonMain.get())
-            iosX64Main.dependsOn(this)
+            // iosX64Main.dependsOn(this)  // Disabled
             iosArm64Main.dependsOn(this)
-            iosSimulatorArm64Main.dependsOn(this)
+            // iosSimulatorArm64Main.dependsOn(this)  // Disabled
             dependencies {
                 implementation("io.ktor:ktor-client-darwin:3.0.3")
                 implementation("app.cash.sqldelight:native-driver:2.0.2")

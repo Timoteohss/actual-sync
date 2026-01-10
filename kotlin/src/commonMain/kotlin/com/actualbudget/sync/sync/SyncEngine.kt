@@ -71,14 +71,13 @@ class SyncEngine(
 
         val envelope = MessageEnvelope.create(ts.toString(), message)
 
-        // Store in local database
+        // Store in local database (value stored as BLOB)
         db.actualDatabaseQueries.insertMessage(
             timestamp = ts.toString(),
             dataset = dataset,
-            row_id = row,
-            column_name = column,
-            value_ = encodedValue,
-            applied = 1 // Already applied locally
+            row = row,
+            column = column,
+            value_ = encodedValue.encodeToByteArray()
         )
 
         // Apply the change to entity tables immediately
@@ -190,9 +189,18 @@ class SyncEngine(
      */
     fun processSyncResponse(response: SyncResponse): Int {
         var applied = 0
+        var skippedEncrypted = 0
+
+        println("[SyncEngine] Processing sync response with ${response.messages.size} messages")
 
         // Apply remote messages
         for (envelope in response.messages) {
+            if (envelope.isEncrypted) {
+                skippedEncrypted++
+                if (skippedEncrypted <= 5) {
+                    println("[SyncEngine] SKIPPING encrypted message: ${envelope.timestamp}")
+                }
+            }
             if (!envelope.isEncrypted) {
                 try {
                     val message = envelope.decodeMessage()
@@ -205,13 +213,15 @@ class SyncEngine(
                     if (existingCount == 0L) {
                         // Store and apply
                         applyMessage(envelope.timestamp, message)
+                        applied++
+                    } else {
+                        // Skip - already have this message
+                        println("[SyncEngine] SKIP (exists): ${message.dataset}.${message.column} = '${message.value.take(50)}' (row: ${message.row.take(20)})")
 
                         // Update local merkle
                         if (ts != null) {
                             localMerkle = Merkle.insert(localMerkle, ts)
                         }
-
-                        applied++
                     }
                 } catch (e: Exception) {
                     println("Failed to apply message: ${e.message}")
@@ -232,6 +242,8 @@ class SyncEngine(
         // Clear pending messages that were successfully sent
         clearPendingMessages()
 
+        println("[SyncEngine] Sync complete: applied=$applied, skippedEncrypted=$skippedEncrypted, total=${response.messages.size}")
+
         return applied
     }
 
@@ -239,14 +251,16 @@ class SyncEngine(
      * Apply a CRDT message to the database.
      */
     private fun applyMessage(timestamp: String, message: Message) {
-        // Store in CRDT log
+        // Debug logging for all messages
+        println("[SyncEngine] MSG: ${message.dataset}.${message.column} = '${message.value.take(50)}' (row: ${message.row.take(20)})")
+
+        // Store in CRDT log (value stored as BLOB)
         db.actualDatabaseQueries.insertMessage(
             timestamp = timestamp,
             dataset = message.dataset,
-            row_id = message.row,
-            column_name = message.column,
-            value_ = message.value,
-            applied = 0
+            row = message.row,
+            column = message.column,
+            value_ = message.value.encodeToByteArray()
         )
 
         // Parse the value
@@ -260,9 +274,6 @@ class SyncEngine(
             "category_groups" -> applyToCategoryGroup(message.row, message.column, parsedValue)
             "transactions" -> applyToTransaction(message.row, message.column, parsedValue)
         }
-
-        // Mark as applied
-        db.actualDatabaseQueries.markMessageApplied(timestamp)
     }
 
     /**
@@ -284,7 +295,7 @@ class SyncEngine(
         // Ensure exists
         val existing = db.actualDatabaseQueries.getAccountById(id).executeAsOneOrNull()
         if (existing == null) {
-            db.actualDatabaseQueries.insertAccount(id, "", 0, 0, 0, 0)
+            db.actualDatabaseQueries.insertAccount(id, "", 0, 0, null, 0)
         }
 
         val current = db.actualDatabaseQueries.getAccountById(id).executeAsOne()
@@ -292,7 +303,7 @@ class SyncEngine(
             "name" -> db.actualDatabaseQueries.insertAccount(id, value as? String ?: "", current.offbudget, current.closed, current.sort_order, current.tombstone)
             "offbudget" -> db.actualDatabaseQueries.insertAccount(id, current.name, (value as? Long) ?: 0L, current.closed, current.sort_order, current.tombstone)
             "closed" -> db.actualDatabaseQueries.insertAccount(id, current.name, current.offbudget, (value as? Long) ?: 0L, current.sort_order, current.tombstone)
-            "sort_order" -> db.actualDatabaseQueries.insertAccount(id, current.name, current.offbudget, current.closed, (value as? Long) ?: 0L, current.tombstone)
+            "sort_order" -> db.actualDatabaseQueries.insertAccount(id, current.name, current.offbudget, current.closed, (value as? Long)?.toDouble(), current.tombstone)
             "tombstone" -> db.actualDatabaseQueries.insertAccount(id, current.name, current.offbudget, current.closed, current.sort_order, (value as? Long) ?: 0L)
         }
     }
@@ -314,7 +325,7 @@ class SyncEngine(
     private fun applyToCategory(id: String, column: String, value: Any?) {
         val existing = db.actualDatabaseQueries.getCategoryById(id).executeAsOneOrNull()
         if (existing == null) {
-            db.actualDatabaseQueries.insertCategory(id, "", null, 0, 0, 0, 0)
+            db.actualDatabaseQueries.insertCategory(id, "", null, 0, null, 0, 0)
         }
 
         val current = db.actualDatabaseQueries.getCategoryById(id).executeAsOne()
@@ -322,7 +333,7 @@ class SyncEngine(
             "name" -> db.actualDatabaseQueries.insertCategory(id, value as? String ?: "", current.cat_group, current.is_income, current.sort_order, current.hidden, current.tombstone)
             "cat_group" -> db.actualDatabaseQueries.insertCategory(id, current.name, value as? String, current.is_income, current.sort_order, current.hidden, current.tombstone)
             "is_income" -> db.actualDatabaseQueries.insertCategory(id, current.name, current.cat_group, (value as? Long) ?: 0L, current.sort_order, current.hidden, current.tombstone)
-            "sort_order" -> db.actualDatabaseQueries.insertCategory(id, current.name, current.cat_group, current.is_income, (value as? Long) ?: 0L, current.hidden, current.tombstone)
+            "sort_order" -> db.actualDatabaseQueries.insertCategory(id, current.name, current.cat_group, current.is_income, (value as? Long)?.toDouble(), current.hidden, current.tombstone)
             "hidden" -> db.actualDatabaseQueries.insertCategory(id, current.name, current.cat_group, current.is_income, current.sort_order, (value as? Long) ?: 0L, current.tombstone)
             "tombstone" -> db.actualDatabaseQueries.insertCategory(id, current.name, current.cat_group, current.is_income, current.sort_order, current.hidden, (value as? Long) ?: 0L)
         }
@@ -331,14 +342,14 @@ class SyncEngine(
     private fun applyToCategoryGroup(id: String, column: String, value: Any?) {
         val existing = db.actualDatabaseQueries.getCategoryGroupById(id).executeAsOneOrNull()
         if (existing == null) {
-            db.actualDatabaseQueries.insertCategoryGroup(id, "", 0, 0, 0, 0)
+            db.actualDatabaseQueries.insertCategoryGroup(id, "", 0, null, 0, 0)
         }
 
         val current = db.actualDatabaseQueries.getCategoryGroupById(id).executeAsOne()
         when (column) {
             "name" -> db.actualDatabaseQueries.insertCategoryGroup(id, value as? String ?: "", current.is_income, current.sort_order, current.hidden, current.tombstone)
             "is_income" -> db.actualDatabaseQueries.insertCategoryGroup(id, current.name, (value as? Long) ?: 0L, current.sort_order, current.hidden, current.tombstone)
-            "sort_order" -> db.actualDatabaseQueries.insertCategoryGroup(id, current.name, current.is_income, (value as? Long) ?: 0L, current.hidden, current.tombstone)
+            "sort_order" -> db.actualDatabaseQueries.insertCategoryGroup(id, current.name, current.is_income, (value as? Long)?.toDouble(), current.hidden, current.tombstone)
             "hidden" -> db.actualDatabaseQueries.insertCategoryGroup(id, current.name, current.is_income, current.sort_order, (value as? Long) ?: 0L, current.tombstone)
             "tombstone" -> db.actualDatabaseQueries.insertCategoryGroup(id, current.name, current.is_income, current.sort_order, current.hidden, (value as? Long) ?: 0L)
         }
@@ -347,34 +358,28 @@ class SyncEngine(
     private fun applyToTransaction(id: String, column: String, value: Any?) {
         val existing = db.actualDatabaseQueries.getTransactionById(id).executeAsOneOrNull()
         if (existing == null) {
-            db.actualDatabaseQueries.insertTransaction(id, null, null, 0, null, null, null, null, null, 0, 0, null, 0, null, 0, 0, null, null, 0, 0)
+            db.actualDatabaseQueries.insertTransaction(id, null, null, 0, null, null, null, null, 0, 1)
         }
 
         val current = db.actualDatabaseQueries.getTransactionById(id).executeAsOne()
         val updated = when (column) {
             "acct", "account" -> current.copy(acct = value as? String)
             "category" -> current.copy(category = value as? String)
-            "amount" -> current.copy(amount = (value as? Long) ?: 0L)
-            "payee" -> current.copy(payee = value as? String)
+            "amount" -> current.copy(amount = (value as? Long))
+            // CRITICAL: Actual server uses "description" column to store payee ID
+            "description", "payee" -> current.copy(description = value as? String)
             "notes" -> current.copy(notes = value as? String)
             "date" -> current.copy(date = value as? Long)
-            "cleared" -> current.copy(cleared = (value as? Long) ?: 0L)
-            "reconciled" -> current.copy(reconciled = (value as? Long) ?: 0L)
-            "sort_order" -> current.copy(sort_order = (value as? Long) ?: 0L)
-            "tombstone" -> current.copy(tombstone = (value as? Long) ?: 0L)
-            "transferred_id" -> current.copy(transferred_id = value as? String)
-            "parent_id" -> current.copy(parent_id = value as? String)
-            "is_parent" -> current.copy(is_parent = (value as? Long) ?: 0L)
-            "is_child" -> current.copy(is_child = (value as? Long) ?: 0L)
+            "cleared" -> current.copy(cleared = (value as? Long))
+            "sort_order" -> current.copy(sort_order = (value as? Long)?.toDouble())
+            "tombstone" -> current.copy(tombstone = (value as? Long))
+            // Ignore columns that don't exist in minimal schema
             else -> current
         }
 
         db.actualDatabaseQueries.insertTransaction(
-            updated.id, updated.acct, updated.category, updated.amount, updated.payee,
-            updated.notes, updated.date, updated.financial_id, updated.type, updated.cleared,
-            updated.reconciled, updated.error, updated.starting_balance_flag, updated.transferred_id,
-            updated.sort_order, updated.tombstone, updated.schedule, updated.parent_id,
-            updated.is_parent, updated.is_child
+            updated.id, updated.acct, updated.category, updated.amount ?: 0, updated.description,
+            updated.notes, updated.date, updated.sort_order, updated.tombstone ?: 0, updated.cleared ?: 1
         )
     }
 

@@ -6,6 +6,9 @@ import app.cash.sqldelight.db.SqlDriver
  * Factory for creating platform-specific SQLite drivers.
  */
 expect class DatabaseDriverFactory {
+    /**
+     * Create a driver that will apply schema migrations (for new databases).
+     */
     fun createDriver(dbName: String): SqlDriver
 }
 

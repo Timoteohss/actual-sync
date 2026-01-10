@@ -1,19 +1,19 @@
--- Accounts table
+-- Accounts table (simplified to match Actual Budget's actual schema)
 CREATE TABLE accounts (
     id TEXT PRIMARY KEY NOT NULL,
-    name TEXT NOT NULL DEFAULT '',
-    offbudget INTEGER NOT NULL DEFAULT 0,
-    closed INTEGER NOT NULL DEFAULT 0,
-    sort_order INTEGER NOT NULL DEFAULT 0,
-    tombstone INTEGER NOT NULL DEFAULT 0
+    name TEXT,
+    offbudget INTEGER DEFAULT 0,
+    closed INTEGER DEFAULT 0,
+    tombstone INTEGER DEFAULT 0,
+    sort_order REAL
 );
 
--- Payees table
+-- Payees table (minimal columns that exist in all Actual versions)
 CREATE TABLE payees (
     id TEXT PRIMARY KEY NOT NULL,
-    name TEXT NOT NULL DEFAULT '',
+    name TEXT,
     category TEXT,
-    tombstone INTEGER NOT NULL DEFAULT 0
+    tombstone INTEGER DEFAULT 0
 );
 
 -- Payee mapping rules
@@ -23,53 +23,40 @@ CREATE TABLE payee_mapping (
     tombstone INTEGER NOT NULL DEFAULT 0
 );
 
--- Category groups
+-- Category groups (matches Actual Budget schema)
 CREATE TABLE category_groups (
     id TEXT PRIMARY KEY NOT NULL,
-    name TEXT NOT NULL DEFAULT '',
-    is_income INTEGER NOT NULL DEFAULT 0,
-    sort_order INTEGER NOT NULL DEFAULT 0,
-    hidden INTEGER NOT NULL DEFAULT 0,
-    tombstone INTEGER NOT NULL DEFAULT 0
+    name TEXT,
+    is_income INTEGER DEFAULT 0,
+    sort_order REAL,
+    tombstone INTEGER DEFAULT 0,
+    hidden INTEGER DEFAULT 0
 );
 
--- Categories
+-- Categories (matches Actual Budget schema)
 CREATE TABLE categories (
     id TEXT PRIMARY KEY NOT NULL,
-    name TEXT NOT NULL DEFAULT '',
+    name TEXT,
+    is_income INTEGER DEFAULT 0,
     cat_group TEXT,
-    is_income INTEGER NOT NULL DEFAULT 0,
-    sort_order INTEGER NOT NULL DEFAULT 0,
-    hidden INTEGER NOT NULL DEFAULT 0,
-    tombstone INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (cat_group) REFERENCES category_groups(id)
+    sort_order REAL,
+    tombstone INTEGER DEFAULT 0,
+    hidden INTEGER DEFAULT 0
 );
 
--- Transactions
+-- Transactions (minimal columns that exist in all Actual versions)
+-- Note: 'description' column stores the payee ID (not the payee name)
 CREATE TABLE transactions (
     id TEXT PRIMARY KEY NOT NULL,
     acct TEXT,
     category TEXT,
-    amount INTEGER NOT NULL DEFAULT 0,
-    payee TEXT,
+    amount INTEGER,
+    description TEXT,
     notes TEXT,
     date INTEGER,
-    financial_id TEXT,
-    type TEXT,
-    cleared INTEGER NOT NULL DEFAULT 0,
-    reconciled INTEGER NOT NULL DEFAULT 0,
-    error TEXT,
-    starting_balance_flag INTEGER NOT NULL DEFAULT 0,
-    transferred_id TEXT,
-    sort_order INTEGER NOT NULL DEFAULT 0,
-    tombstone INTEGER NOT NULL DEFAULT 0,
-    schedule TEXT,
-    parent_id TEXT,
-    is_parent INTEGER NOT NULL DEFAULT 0,
-    is_child INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (acct) REFERENCES accounts(id),
-    FOREIGN KEY (category) REFERENCES categories(id),
-    FOREIGN KEY (payee) REFERENCES payees(id)
+    sort_order REAL,
+    tombstone INTEGER DEFAULT 0,
+    cleared INTEGER DEFAULT 1
 );
 
 -- Monthly budget amounts
@@ -120,19 +107,17 @@ CREATE TABLE rules (
     tombstone INTEGER NOT NULL DEFAULT 0
 );
 
--- CRDT messages log (for sync)
+-- CRDT messages log (for sync) - matches Actual Budget's schema
 CREATE TABLE messages_crdt (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id INTEGER PRIMARY KEY,
     timestamp TEXT NOT NULL UNIQUE,
     dataset TEXT NOT NULL,
-    row_id TEXT NOT NULL,
-    column_name TEXT NOT NULL,
-    value TEXT NOT NULL,
-    applied INTEGER NOT NULL DEFAULT 0
+    row TEXT NOT NULL,
+    column TEXT NOT NULL,
+    value BLOB NOT NULL
 );
 
-CREATE INDEX messages_crdt_timestamp ON messages_crdt(timestamp);
-CREATE INDEX messages_crdt_applied ON messages_crdt(applied);
+CREATE INDEX messages_crdt_search ON messages_crdt(dataset, row, column, timestamp);
 
 -- Sync metadata
 CREATE TABLE sync_metadata (
@@ -200,8 +185,8 @@ getTransactionById:
 SELECT * FROM transactions WHERE id = ?;
 
 insertTransaction:
-INSERT OR REPLACE INTO transactions(id, acct, category, amount, payee, notes, date, financial_id, type, cleared, reconciled, error, starting_balance_flag, transferred_id, sort_order, tombstone, schedule, parent_id, is_parent, is_child)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO transactions(id, acct, category, amount, description, notes, date, sort_order, tombstone, cleared)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- Budget
 getBudgetForMonth:
@@ -214,16 +199,10 @@ insertBudget:
 INSERT OR REPLACE INTO zero_budgets(id, month, category, amount, carryover, goal, tombstone)
 VALUES (?, ?, ?, ?, ?, ?, ?);
 
--- CRDT Messages
+-- CRDT Messages (using Actual Budget's column names: row, column, value as BLOB)
 insertMessage:
-INSERT OR IGNORE INTO messages_crdt(timestamp, dataset, row_id, column_name, value, applied)
-VALUES (?, ?, ?, ?, ?, ?);
-
-getUnappliedMessages:
-SELECT * FROM messages_crdt WHERE applied = 0 ORDER BY timestamp;
-
-markMessageApplied:
-UPDATE messages_crdt SET applied = 1 WHERE timestamp = ?;
+INSERT OR IGNORE INTO messages_crdt(timestamp, dataset, row, column, value)
+VALUES (?, ?, ?, ?, ?);
 
 getMessagesSince:
 SELECT * FROM messages_crdt WHERE timestamp > ? ORDER BY timestamp;
@@ -273,6 +252,18 @@ UPDATE category_groups SET name = CASE WHEN ?1 = 'name' THEN ?3 ELSE name END,
                            tombstone = CASE WHEN ?1 = 'tombstone' THEN ?3 ELSE tombstone END
 WHERE id = ?2;
 
+updateTransactionColumn:
+UPDATE transactions SET acct = CASE WHEN ?1 = 'acct' THEN ?3 ELSE acct END,
+                        category = CASE WHEN ?1 = 'category' THEN ?3 ELSE category END,
+                        amount = CASE WHEN ?1 = 'amount' THEN ?3 ELSE amount END,
+                        description = CASE WHEN ?1 = 'description' OR ?1 = 'payee' THEN ?3 ELSE description END,
+                        notes = CASE WHEN ?1 = 'notes' THEN ?3 ELSE notes END,
+                        date = CASE WHEN ?1 = 'date' THEN ?3 ELSE date END,
+                        cleared = CASE WHEN ?1 = 'cleared' THEN ?3 ELSE cleared END,
+                        tombstone = CASE WHEN ?1 = 'tombstone' THEN ?3 ELSE tombstone END,
+                        sort_order = CASE WHEN ?1 = 'sort_order' THEN ?3 ELSE sort_order END
+WHERE id = ?2;
+
 -- Clear all data (for reset)
 clearAccounts:
 DELETE FROM accounts;
@@ -297,3 +288,39 @@ DELETE FROM messages_crdt;
 
 clearMetadata:
 DELETE FROM sync_metadata;
+
+-- Diagnostic queries (counts ALL rows, ignoring tombstone)
+countAllAccounts:
+SELECT COUNT(*) AS cnt FROM accounts;
+
+countAllPayees:
+SELECT COUNT(*) AS cnt FROM payees;
+
+countAllCategories:
+SELECT COUNT(*) AS cnt FROM categories;
+
+countAllCategoryGroups:
+SELECT COUNT(*) AS cnt FROM category_groups;
+
+countAllTransactions:
+SELECT COUNT(*) AS cnt FROM transactions;
+
+-- Get ALL accounts (including tombstoned)
+getAllAccounts:
+SELECT * FROM accounts;
+
+-- Get ALL payees (including tombstoned)
+getAllPayees:
+SELECT * FROM payees;
+
+-- Get ALL categories (including tombstoned)
+getAllCategories:
+SELECT * FROM categories;
+
+-- Get ALL category groups (including tombstoned)
+getAllCategoryGroups:
+SELECT * FROM category_groups;
+
+-- Get ALL transactions (including tombstoned)
+getAllTransactions:
+SELECT * FROM transactions;

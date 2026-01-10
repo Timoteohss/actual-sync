@@ -31,26 +31,25 @@ class ActualClient(
     /**
      * Authenticate with the server.
      */
-    suspend fun login(password: String): Result<Unit> {
-        return syncClient.login(password).map { }
+    suspend fun login(password: String) {
+        syncClient.login(password)
     }
 
     /**
      * List available budgets.
      */
-    suspend fun getBudgets(): Result<List<BudgetFile>> {
+    suspend fun getBudgets(): List<BudgetFile> {
         return syncClient.listFiles()
     }
 
     /**
      * Download and open a budget.
      */
-    suspend fun downloadBudget(syncId: String, password: String? = null): Result<Unit> {
-        return syncClient.downloadBudget(syncId).map {
-            // TODO: Save to local storage
-            // TODO: Decrypt if password provided
-            // TODO: Initialize local database
-        }
+    suspend fun downloadBudget(syncId: String, password: String? = null) {
+        syncClient.downloadBudget(syncId)
+        // TODO: Save to local storage
+        // TODO: Decrypt if password provided
+        // TODO: Initialize local database
     }
 
     /**
