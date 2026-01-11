@@ -1,0 +1,31 @@
+{
+  "object" : {
+    "artifacts" : [
+      {
+        "kind" : {
+          "xcframework" : {
+
+          }
+        },
+        "packageRef" : {
+          "identity" : "actual-sync",
+          "kind" : "root",
+          "location" : "/Users/timoteosousa/apps/actual-sync",
+          "name" : "actual-sync"
+        },
+        "path" : "/Users/timoteosousa/apps/actual-sync/kotlin/build/XCFrameworks/release/ActualSync.xcframework",
+        "source" : {
+          "type" : "local"
+        },
+        "targetName" : "ActualSync"
+      }
+    ],
+    "dependencies" : [
+
+    ],
+    "prebuilts" : [
+
+    ]
+  },
+  "version" : 7
+}

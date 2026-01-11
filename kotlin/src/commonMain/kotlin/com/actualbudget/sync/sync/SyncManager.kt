@@ -13,6 +13,17 @@ import io.ktor.client.statement.*
 import io.ktor.http.*
 
 /**
+ * Details about a single pending change.
+ */
+data class PendingChangeDetail(
+    val dataset: String,
+    val rowId: String,
+    val column: String,
+    val value: String,
+    val timestamp: String
+)
+
+/**
  * High-level sync manager that coordinates sync operations.
  */
 class SyncManager(
@@ -273,10 +284,15 @@ class SyncManager(
 
     /**
      * Create a new payee locally.
+     * Also creates the required payee_mapping entry (id -> id) for the payee to be usable.
      */
     fun createPayee(id: String, name: String): String {
         engine.createChange("payees", id, "name", name)
         engine.createChange("payees", id, "tombstone", 0)
+        // Actual Budget requires a payee_mapping entry for each payee
+        // The mapping points to itself (id -> id) for regular payees
+        // NOTE: payee_mapping table has NO tombstone column in Actual Budget
+        engine.createChange("payee_mapping", id, "targetId", id)
         return id
     }
 
@@ -325,7 +341,7 @@ class SyncManager(
      * @param accountId Account ID
      * @param date Date as YYYYMMDD integer
      * @param amount Amount in cents (negative for expenses)
-     * @param payeeId Optional payee ID (stored in 'description' column in Actual)
+     * @param payeeId Optional payee ID
      * @param categoryId Optional category ID
      * @param notes Optional notes
      */
@@ -341,7 +357,7 @@ class SyncManager(
         engine.createChange("transactions", id, "acct", accountId)
         engine.createChange("transactions", id, "date", date)
         engine.createChange("transactions", id, "amount", amount)
-        // Actual stores payee ID in 'description' column
+        // Database column is 'description' which maps to 'payee' in the public API
         if (payeeId != null) engine.createChange("transactions", id, "description", payeeId)
         if (categoryId != null) engine.createChange("transactions", id, "category", categoryId)
         if (notes != null) engine.createChange("transactions", id, "notes", notes)
@@ -368,6 +384,89 @@ class SyncManager(
      * Get the number of pending changes.
      */
     fun getPendingChangeCount(): Int = engine.getPendingMessages().size
+
+    /**
+     * Get a summary of pending changes grouped by type.
+     * Returns a list of human-readable descriptions.
+     */
+    fun getPendingChangeSummary(): List<String> {
+        val messages = engine.getPendingMessages()
+        if (messages.isEmpty()) return emptyList()
+
+        // Group by dataset and row to get unique entities changed
+        val changesByDataset = mutableMapOf<String, MutableSet<String>>()
+
+        for (envelope in messages) {
+            if (!envelope.isEncrypted) {
+                try {
+                    val message = envelope.decodeMessage()
+                    val dataset = message.dataset
+                    val rowId = message.row
+                    changesByDataset.getOrPut(dataset) { mutableSetOf() }.add(rowId)
+                } catch (_: Exception) {
+                    // Skip malformed messages
+                }
+            }
+        }
+
+        // Build human-readable summary
+        val summary = mutableListOf<String>()
+        for ((dataset, rowIds) in changesByDataset) {
+            val count = rowIds.size
+            val entityName = when (dataset) {
+                "transactions" -> if (count == 1) "transaction" else "transactions"
+                "accounts" -> if (count == 1) "account" else "accounts"
+                "payees" -> if (count == 1) "payee" else "payees"
+                "payee_mapping" -> if (count == 1) "payee mapping" else "payee mappings"
+                "categories" -> if (count == 1) "category" else "categories"
+                "category_groups" -> if (count == 1) "category group" else "category groups"
+                else -> dataset
+            }
+            summary.add("$count $entityName")
+        }
+
+        return summary
+    }
+
+    /**
+     * Get detailed pending changes for debugging/display.
+     * Returns a list of change descriptions with dataset, column, and value info.
+     */
+    fun getPendingChangeDetails(): List<PendingChangeDetail> {
+        val messages = engine.getPendingMessages()
+        val details = mutableListOf<PendingChangeDetail>()
+
+        for (envelope in messages) {
+            if (!envelope.isEncrypted) {
+                try {
+                    val message = envelope.decodeMessage()
+                    details.add(
+                        PendingChangeDetail(
+                            dataset = message.dataset,
+                            rowId = message.row,
+                            column = message.column,
+                            value = parseDisplayValue(message.value),
+                            timestamp = envelope.timestamp
+                        )
+                    )
+                } catch (_: Exception) {
+                    // Skip malformed messages
+                }
+            }
+        }
+
+        return details
+    }
+
+    private fun parseDisplayValue(value: String): String {
+        return when {
+            value.startsWith("S:") -> value.substring(2)
+            value.startsWith("N:") -> value.substring(2)
+            value.startsWith("0:") -> "(empty)"
+            value == "null" -> "(empty)"
+            else -> value
+        }
+    }
 
     /**
      * Check if local and server are in sync.

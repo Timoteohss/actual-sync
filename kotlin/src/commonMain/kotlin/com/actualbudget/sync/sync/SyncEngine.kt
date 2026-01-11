@@ -85,6 +85,7 @@ class SyncEngine(
         when (dataset) {
             "accounts" -> applyToAccount(row, column, parsedValue)
             "payees" -> applyToPayee(row, column, parsedValue)
+            "payee_mapping" -> applyToPayeeMapping(row, column, parsedValue)
             "categories" -> applyToCategory(row, column, parsedValue)
             "category_groups" -> applyToCategoryGroup(row, column, parsedValue)
             "transactions" -> applyToTransaction(row, column, parsedValue)
@@ -270,6 +271,7 @@ class SyncEngine(
         when (message.dataset) {
             "accounts" -> applyToAccount(message.row, message.column, parsedValue)
             "payees" -> applyToPayee(message.row, message.column, parsedValue)
+            "payee_mapping" -> applyToPayeeMapping(message.row, message.column, parsedValue)
             "categories" -> applyToCategory(message.row, message.column, parsedValue)
             "category_groups" -> applyToCategoryGroup(message.row, message.column, parsedValue)
             "transactions" -> applyToTransaction(message.row, message.column, parsedValue)
@@ -319,6 +321,19 @@ class SyncEngine(
             "name" -> db.actualDatabaseQueries.insertPayee(id, value as? String ?: "", current.category, current.tombstone)
             "category" -> db.actualDatabaseQueries.insertPayee(id, current.name, value as? String, current.tombstone)
             "tombstone" -> db.actualDatabaseQueries.insertPayee(id, current.name, current.category, (value as? Long) ?: 0L)
+        }
+    }
+
+    private fun applyToPayeeMapping(id: String, column: String, value: Any?) {
+        val existing = db.actualDatabaseQueries.getPayeeMappingById(id).executeAsOneOrNull()
+        if (existing == null) {
+            // Default: mapping points to itself
+            db.actualDatabaseQueries.insertPayeeMapping(id, id)
+        }
+
+        // NOTE: payee_mapping has only 'id' and 'targetId' columns (no tombstone)
+        when (column) {
+            "targetId" -> db.actualDatabaseQueries.insertPayeeMapping(id, value as? String ?: id)
         }
     }
 

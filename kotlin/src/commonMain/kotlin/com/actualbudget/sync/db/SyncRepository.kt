@@ -53,7 +53,8 @@ class SyncRepository(private val db: ActualDatabase) {
                 applyPayeeColumn(message.row, message.column, parsedValue)
             }
             "payee_mapping" -> {
-                // Handle payee mapping
+                ensurePayeeMappingExists(message.row)
+                applyPayeeMappingColumn(message.row, message.column, parsedValue)
             }
             "categories" -> {
                 ensureCategoryExists(message.row)
@@ -205,6 +206,25 @@ class SyncRepository(private val db: ActualDatabase) {
             "name" -> db.actualDatabaseQueries.insertPayee(id, value as? String ?: "", current.category, current.tombstone)
             "category" -> db.actualDatabaseQueries.insertPayee(id, current.name, value as? String, current.tombstone)
             "tombstone" -> db.actualDatabaseQueries.insertPayee(id, current.name, current.category, (value as? Long) ?: 0L)
+        }
+    }
+
+    // ========== Payee Mapping Operations ==========
+    // NOTE: payee_mapping table has only 'id' and 'targetId' columns (no tombstone)
+
+    private fun ensurePayeeMappingExists(id: String) {
+        val existing = db.actualDatabaseQueries.getPayeeMappingById(id).executeAsOneOrNull()
+        if (existing == null) {
+            db.actualDatabaseQueries.insertPayeeMapping(
+                id = id,
+                targetId = id  // Default: points to itself
+            )
+        }
+    }
+
+    private fun applyPayeeMappingColumn(id: String, column: String, value: Any?) {
+        when (column) {
+            "targetId" -> db.actualDatabaseQueries.insertPayeeMapping(id, value as? String ?: id)
         }
     }
 

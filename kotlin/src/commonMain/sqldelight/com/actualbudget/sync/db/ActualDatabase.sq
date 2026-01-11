@@ -16,11 +16,10 @@ CREATE TABLE payees (
     tombstone INTEGER DEFAULT 0
 );
 
--- Payee mapping rules
+-- Payee mapping rules (NOTE: No tombstone column - matches Actual Budget schema)
 CREATE TABLE payee_mapping (
     id TEXT PRIMARY KEY NOT NULL,
-    targetId TEXT NOT NULL,
-    tombstone INTEGER NOT NULL DEFAULT 0
+    targetId TEXT
 );
 
 -- Category groups (matches Actual Budget schema)
@@ -148,6 +147,14 @@ SELECT * FROM payees WHERE id = ?;
 insertPayee:
 INSERT OR REPLACE INTO payees(id, name, category, tombstone)
 VALUES (?, ?, ?, ?);
+
+-- Payee Mapping
+getPayeeMappingById:
+SELECT * FROM payee_mapping WHERE id = ?;
+
+insertPayeeMapping:
+INSERT OR REPLACE INTO payee_mapping(id, targetId)
+VALUES (?, ?);
 
 -- Category Groups
 getCategoryGroups:

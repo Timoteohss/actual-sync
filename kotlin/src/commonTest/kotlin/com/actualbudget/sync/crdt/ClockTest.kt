@@ -19,7 +19,7 @@ class ClockTest {
 
     @Test
     fun testMutableClockSendIncrementsCounter() {
-        val clock = MutableClock(millis = System.currentTimeMillis(), counter = 0, node = "TESTNODEID123456")
+        val clock = MutableClock(millis = 1700000000000L, counter = 0, node = "TESTNODEID123456")
 
         // Send multiple times quickly - counter should increment
         val ts1 = clock.send()
@@ -37,7 +37,7 @@ class ClockTest {
     fun testMutableClockRecv() {
         val clock = MutableClock(node = "LOCALNODEID12345")
         val remoteTs = Timestamp(
-            millis = System.currentTimeMillis() + 1000, // 1 second in future
+            millis = 1700000001000L, // Fixed future timestamp
             counter = 5,
             node = "REMOTENODEID1234"
         )
@@ -69,7 +69,7 @@ class ClockTest {
         val initialHash = syncClock.merkle.hash
 
         val remoteTs = Timestamp(
-            millis = System.currentTimeMillis(),
+            millis = 1700000000000L,
             counter = 0,
             node = "REMOTENODEID1234"
         )
