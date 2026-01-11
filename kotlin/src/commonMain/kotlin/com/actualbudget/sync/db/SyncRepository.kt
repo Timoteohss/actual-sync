@@ -68,8 +68,13 @@ class SyncRepository(private val db: ActualDatabase) {
                 ensureTransactionExists(message.row)
                 applyTransactionColumn(message.row, message.column, parsedValue)
             }
-            "zero_budgets", "zero_budget_months" -> {
-                // Handle budget data
+            "zero_budgets" -> {
+                ensureBudgetExists(message.row)
+                applyBudgetColumn(message.row, message.column, parsedValue)
+            }
+            "zero_budget_months" -> {
+                // Buffer amounts per month - not critical for basic budget display
+                // Can be implemented later for carryover feature
             }
             "schedules" -> {
                 // Handle schedules
@@ -338,6 +343,59 @@ class SyncRepository(private val db: ActualDatabase) {
         )
     }
 
+    // ========== Budget Operations ==========
+
+    private fun ensureBudgetExists(id: String) {
+        val existing = db.actualDatabaseQueries.getBudgetById(id).executeAsOneOrNull()
+        if (existing == null) {
+            // Parse month and category from id (format: "YYYYMM-categoryId")
+            val parts = id.split("-", limit = 2)
+            val month = parts.getOrNull(0)?.toLongOrNull() ?: 0L
+            val category = parts.getOrNull(1) ?: ""
+
+            db.actualDatabaseQueries.insertBudget(
+                id = id,
+                month = month,
+                category = category,
+                amount = 0,
+                carryover = 0,
+                goal = null,
+                tombstone = 0
+            )
+        }
+    }
+
+    private fun applyBudgetColumn(id: String, column: String, value: Any?) {
+        val current = db.actualDatabaseQueries.getBudgetById(id).executeAsOneOrNull() ?: return
+
+        when (column) {
+            "month" -> db.actualDatabaseQueries.insertBudget(
+                id, (value as? Long) ?: current.month, current.category,
+                current.amount, current.carryover, current.goal, current.tombstone
+            )
+            "category" -> db.actualDatabaseQueries.insertBudget(
+                id, current.month, (value as? String) ?: current.category,
+                current.amount, current.carryover, current.goal, current.tombstone
+            )
+            "amount" -> db.actualDatabaseQueries.insertBudget(
+                id, current.month, current.category,
+                (value as? Long) ?: 0L, current.carryover, current.goal, current.tombstone
+            )
+            "carryover" -> db.actualDatabaseQueries.insertBudget(
+                id, current.month, current.category,
+                current.amount, (value as? Long) ?: 0L, current.goal, current.tombstone
+            )
+            "goal" -> db.actualDatabaseQueries.insertBudget(
+                id, current.month, current.category,
+                current.amount, current.carryover, value as? Long, current.tombstone
+            )
+            "tombstone" -> db.actualDatabaseQueries.insertBudget(
+                id, current.month, current.category,
+                current.amount, current.carryover, current.goal, (value as? Long) ?: 0L
+            )
+        }
+    }
+
     // ========== Query Methods ==========
 
     fun getAccounts() = db.actualDatabaseQueries.getAccounts().executeAsList()
@@ -353,6 +411,12 @@ class SyncRepository(private val db: ActualDatabase) {
 
     fun getTransactionsByDateRange(startDate: Long, endDate: Long) =
         db.actualDatabaseQueries.getTransactionsByDateRange(startDate, endDate).executeAsList()
+
+    fun getBudgetForMonth(month: Long) =
+        db.actualDatabaseQueries.getBudgetForMonth(month).executeAsList()
+
+    fun getBudgetForCategory(category: String) =
+        db.actualDatabaseQueries.getBudgetForCategory(category).executeAsList()
 
     fun getLastSyncTimestamp(): String? =
         db.actualDatabaseQueries.getLastTimestamp().executeAsOneOrNull()?.last_ts

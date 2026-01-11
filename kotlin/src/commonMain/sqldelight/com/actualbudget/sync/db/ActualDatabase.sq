@@ -202,6 +202,9 @@ SELECT * FROM zero_budgets WHERE month = ? AND tombstone = 0;
 getBudgetForCategory:
 SELECT * FROM zero_budgets WHERE category = ? AND tombstone = 0;
 
+getBudgetById:
+SELECT * FROM zero_budgets WHERE id = ?;
+
 insertBudget:
 INSERT OR REPLACE INTO zero_budgets(id, month, category, amount, carryover, goal, tombstone)
 VALUES (?, ?, ?, ?, ?, ?, ?);
