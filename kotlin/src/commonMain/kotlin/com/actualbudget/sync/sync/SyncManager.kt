@@ -368,9 +368,25 @@ class SyncManager(
 
     /**
      * Update a transaction field.
+     * Field names are normalized to match database schema:
+     * - "payee" -> "description"
+     * - "account" -> "acct"
      */
     fun updateTransaction(id: String, field: String, value: Any?) {
-        engine.createChange("transactions", id, field, value)
+        val normalizedField = normalizeTransactionField(field)
+        engine.createChange("transactions", id, normalizedField, value)
+    }
+
+    /**
+     * Normalize transaction field names to match database schema.
+     * The public API uses friendly names but the database uses different column names.
+     */
+    private fun normalizeTransactionField(field: String): String {
+        return when (field) {
+            "payee" -> "description"  // Database stores payee ID in 'description' column
+            "account" -> "acct"       // Database uses 'acct' for account ID
+            else -> field
+        }
     }
 
     /**
