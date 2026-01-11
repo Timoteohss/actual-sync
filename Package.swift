@@ -16,7 +16,8 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "ActualSync",
-            path: "kotlin/build/XCFrameworks/release/ActualSync.xcframework"
+            url: "https://github.com/Timoteohss/actual-sync/releases/download/v0.1.0/ActualSync.xcframework.zip",
+            checksum: "00798de8a4a5f8569dbb99482a88ac264fe1c7d669a90b8bf3790b1d06d0369c"
         ),
     ]
 )
