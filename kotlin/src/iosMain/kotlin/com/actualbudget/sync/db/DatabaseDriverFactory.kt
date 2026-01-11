@@ -42,7 +42,7 @@ fun createDriverForExistingDb(dbName: String): SqlDriver {
     return NativeSqliteDriver(
         configuration = DatabaseConfiguration(
             name = dbName,
-            version = 1,
+            version = 2,  // Bump version for migration
             create = { connection ->
                 // Create only our custom sync_metadata table if it doesn't exist
                 // The downloaded database already has Actual's tables (accounts, payees, etc.)
@@ -53,13 +53,34 @@ fun createDriverForExistingDb(dbName: String): SqlDriver {
                         value TEXT
                     )
                 """.trimIndent())
+                // Ensure zero_budgets has tombstone column
+                addMissingColumns(connection)
             },
-            upgrade = { _, _, _ -> },  // No-op - don't run migrations
+            upgrade = { connection, oldVersion, newVersion ->
+                println("[DatabaseDriverFactory] Upgrading from $oldVersion to $newVersion")
+                if (oldVersion < 2) {
+                    addMissingColumns(connection)
+                }
+            },
             extendedConfig = DatabaseConfiguration.Extended(
                 basePath = basePath  // Explicitly set the base path
             )
         )
     )
+}
+
+/**
+ * Add missing columns to existing tables for compatibility.
+ */
+private fun addMissingColumns(connection: co.touchlab.sqliter.DatabaseConnection) {
+    // Add tombstone to zero_budgets if missing
+    try {
+        connection.rawExecSql("ALTER TABLE zero_budgets ADD COLUMN tombstone INTEGER NOT NULL DEFAULT 0")
+        println("[DatabaseDriverFactory] Added tombstone column to zero_budgets")
+    } catch (e: Exception) {
+        // Column likely already exists
+        println("[DatabaseDriverFactory] tombstone column already exists or table missing: ${e.message}")
+    }
 }
 
 /**
