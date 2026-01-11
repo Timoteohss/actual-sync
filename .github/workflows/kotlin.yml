@@ -17,7 +17,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-14  # Apple Silicon for faster iOS builds
 
     steps:
       - uses: actions/checkout@v4
@@ -31,11 +31,20 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
+      - name: Build
+        working-directory: kotlin
+        run: ./gradlew build
+
+      - name: Run tests
+        working-directory: kotlin
+        run: ./gradlew allTests
+
       - name: Build XCFramework
         working-directory: kotlin
         run: ./gradlew assembleActualSyncXCFramework
 
       - name: Zip XCFramework
+        if: startsWith(github.ref, 'refs/tags/')
         working-directory: kotlin/build/XCFrameworks/release
         run: zip -r ActualSync.xcframework.zip ActualSync.xcframework
 
@@ -43,7 +52,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ActualSync-xcframework
-          path: kotlin/build/XCFrameworks/release/ActualSync.xcframework.zip
+          path: kotlin/build/XCFrameworks/release/ActualSync.xcframework
           retention-days: 7
 
   release:
