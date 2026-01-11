@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.actualbudget"
-version = "0.1.0-SNAPSHOT"
+version = "0.1.0"
 
 kotlin {
     // Android target
@@ -25,11 +25,10 @@ kotlin {
 
     // iOS targets with XCFramework support
     val xcf = XCFramework("ActualSync")
-    // Only build arm64 for faster iteration (real device only)
     listOf(
-        // iosX64(),  // Simulator Intel - disabled for faster builds
-        iosArm64()
-        // iosSimulatorArm64()  // Simulator Apple Silicon - disabled for faster builds
+        iosX64(),           // Simulator Intel
+        iosArm64(),         // Real devices
+        iosSimulatorArm64() // Simulator Apple Silicon
     ).forEach {
         it.binaries.framework {
             baseName = "ActualSync"
@@ -83,14 +82,14 @@ kotlin {
             implementation("app.cash.sqldelight:android-driver:2.0.2")
         }
 
-        // val iosX64Main by getting  // Disabled for faster builds
+        val iosX64Main by getting
         val iosArm64Main by getting
-        // val iosSimulatorArm64Main by getting  // Disabled for faster builds
+        val iosSimulatorArm64Main by getting
         val iosMain by creating {
             dependsOn(commonMain.get())
-            // iosX64Main.dependsOn(this)  // Disabled
+            iosX64Main.dependsOn(this)
             iosArm64Main.dependsOn(this)
-            // iosSimulatorArm64Main.dependsOn(this)  // Disabled
+            iosSimulatorArm64Main.dependsOn(this)
             dependencies {
                 implementation("io.ktor:ktor-client-darwin:3.0.3")
                 implementation("app.cash.sqldelight:native-driver:2.0.2")
