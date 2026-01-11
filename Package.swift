@@ -1,11 +1,5 @@
 // swift-tools-version:5.9
 import PackageDescription
-import Foundation
-
-// Check for local XCFramework (for development)
-let localFrameworkPath = "kotlin/build/XCFrameworks/release/ActualSync.xcframework"
-let useLocalFramework = ProcessInfo.processInfo.environment["USE_LOCAL_XCFRAMEWORK"] == "1" ||
-    FileManager.default.fileExists(atPath: localFrameworkPath)
 
 let package = Package(
     name: "ActualSync",
@@ -20,15 +14,10 @@ let package = Package(
         ),
     ],
     targets: [
-        useLocalFramework
-            ? .binaryTarget(
-                name: "ActualSync",
-                path: localFrameworkPath
-            )
-            : .binaryTarget(
-                name: "ActualSync",
-                url: "https://github.com/Timoteohss/actual-sync/releases/download/v0.1.0/ActualSync.xcframework.zip",
-                checksum: "815e27868f05e28a4338ab914dd7eb40a29e0f63159598c57d5c2f9600f187d8"
-            ),
+        .binaryTarget(
+            name: "ActualSync",
+            url: "https://github.com/Timoteohss/actual-sync/releases/download/v0.1.1/ActualSync.xcframework.zip",
+            checksum: "32b43658ef0da1d72a88774ede824517f67178f47c8b04717cb72339a0965191"
+        ),
     ]
 )
