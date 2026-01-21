@@ -187,6 +187,75 @@ VALUES (?, ?, ?, ?, ?, ?, ?);
 getTransactionsByAccount:
 SELECT * FROM transactions WHERE acct = ? AND tombstone = 0 ORDER BY date DESC, sort_order DESC;
 
+-- Transactions with payee and category names pre-joined (optimized for list views)
+-- Eliminates N dictionary lookups in the UI layer
+getTransactionsWithDetailsForAccount:
+SELECT
+    t.id,
+    t.acct,
+    t.category,
+    t.amount,
+    t.description,
+    t.notes,
+    t.date,
+    t.sort_order,
+    t.cleared,
+    t.pending,
+    t.reconciled,
+    p.name AS payee_name,
+    c.name AS category_name
+FROM transactions t
+LEFT JOIN payees p ON t.description = p.id
+LEFT JOIN categories c ON t.category = c.id
+WHERE t.acct = ? AND t.tombstone = 0
+ORDER BY t.date DESC, t.sort_order DESC;
+
+-- Paginated version with LIMIT and OFFSET for large accounts
+getTransactionsWithDetailsPaginated:
+SELECT
+    t.id,
+    t.acct,
+    t.category,
+    t.amount,
+    t.description,
+    t.notes,
+    t.date,
+    t.sort_order,
+    t.cleared,
+    t.pending,
+    t.reconciled,
+    p.name AS payee_name,
+    c.name AS category_name
+FROM transactions t
+LEFT JOIN payees p ON t.description = p.id
+LEFT JOIN categories c ON t.category = c.id
+WHERE t.acct = ? AND t.tombstone = 0
+ORDER BY t.date DESC, t.sort_order DESC
+LIMIT ? OFFSET ?;
+
+-- Search transactions with text matching (server-side search)
+searchTransactionsForAccount:
+SELECT
+    t.id,
+    t.acct,
+    t.category,
+    t.amount,
+    t.description,
+    t.notes,
+    t.date,
+    t.sort_order,
+    t.cleared,
+    t.pending,
+    t.reconciled,
+    p.name AS payee_name,
+    c.name AS category_name
+FROM transactions t
+LEFT JOIN payees p ON t.description = p.id
+LEFT JOIN categories c ON t.category = c.id
+WHERE t.acct = ? AND t.tombstone = 0
+  AND (p.name LIKE ? OR t.notes LIKE ? OR CAST(t.amount AS TEXT) LIKE ?)
+ORDER BY t.date DESC, t.sort_order DESC;
+
 getTransactionsByDateRange:
 SELECT * FROM transactions WHERE date >= ? AND date <= ? AND tombstone = 0 ORDER BY date DESC, sort_order DESC;
 

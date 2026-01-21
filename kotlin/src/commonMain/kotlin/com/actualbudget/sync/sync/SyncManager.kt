@@ -528,6 +528,45 @@ class SyncManager(
         database.actualDatabaseQueries.getTransactionsByAccount(accountId).executeAsList()
 
     /**
+     * Get transactions with payee and category names pre-joined.
+     * Optimized for list views - eliminates N dictionary lookups in the UI layer.
+     *
+     * @param accountId The account ID
+     * @return List of transactions with payee_name and category_name included
+     */
+    @Throws(Exception::class)
+    fun getTransactionsWithDetailsSafe(accountId: String) =
+        database.actualDatabaseQueries.getTransactionsWithDetailsForAccount(accountId).executeAsList()
+
+    /**
+     * Get transactions with details, paginated for large accounts.
+     *
+     * @param accountId The account ID
+     * @param limit Maximum number of transactions to return
+     * @param offset Number of transactions to skip
+     * @return List of transactions with payee_name and category_name included
+     */
+    @Throws(Exception::class)
+    fun getTransactionsWithDetailsPaginatedSafe(accountId: String, limit: Long, offset: Long) =
+        database.actualDatabaseQueries.getTransactionsWithDetailsPaginated(accountId, limit, offset).executeAsList()
+
+    /**
+     * Search transactions with server-side text matching.
+     * Searches payee name, notes, and amount.
+     *
+     * @param accountId The account ID
+     * @param searchQuery The search text (will be wrapped with % for LIKE)
+     * @return List of matching transactions with payee_name and category_name included
+     */
+    @Throws(Exception::class)
+    fun searchTransactionsSafe(accountId: String, searchQuery: String): List<SearchTransactionsForAccount> {
+        val pattern = "%$searchQuery%"
+        return database.actualDatabaseQueries.searchTransactionsForAccount(
+            accountId, pattern, pattern, pattern
+        ).executeAsList()
+    }
+
+    /**
      * Safely get budget for month - exceptions propagate to Swift as NSError.
      */
     @Throws(Exception::class)
