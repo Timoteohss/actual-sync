@@ -655,6 +655,39 @@ class SyncManager(
         engine.createChange("transactions", transactionId, "reconciled", if (reconciled) 1 else 0)
     }
 
+    /**
+     * Get transactions that are cleared but not yet reconciled.
+     * These are transactions ready to be locked during reconciliation.
+     *
+     * @param accountId The account ID
+     * @return List of cleared but unreconciled transactions
+     */
+    @Throws(Exception::class)
+    fun getClearedUnreconciledTransactionsSafe(accountId: String) =
+        database.actualDatabaseQueries.getClearedUnreconciledTransactions(accountId).executeAsList()
+
+    /**
+     * Get the count of cleared but not yet reconciled transactions.
+     *
+     * @param accountId The account ID
+     * @return Number of transactions ready to be reconciled
+     */
+    @Throws(Exception::class)
+    fun getClearedUnreconciledCountSafe(accountId: String): Long =
+        database.actualDatabaseQueries.getClearedUnreconciledCount(accountId).executeAsOne()
+
+    /**
+     * Mark multiple transactions as reconciled (locked) in one operation.
+     * Creates sync changes for each transaction so they propagate to other devices.
+     *
+     * @param transactionIds List of transaction IDs to reconcile
+     */
+    fun reconcileTransactions(transactionIds: List<String>) {
+        for (id in transactionIds) {
+            engine.createChange("transactions", id, "reconciled", 1)
+        }
+    }
+
     // ========== Diagnostic Methods ==========
 
     /**

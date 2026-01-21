@@ -410,3 +410,15 @@ SELECT
     SUM(CASE WHEN cleared = 0 THEN 1 ELSE 0 END) AS uncleared_count
 FROM transactions
 WHERE acct = ? AND tombstone = 0;
+
+-- Get cleared but not yet reconciled transactions (for reconciliation)
+-- These are transactions ready to be locked during reconciliation
+getClearedUnreconciledTransactions:
+SELECT * FROM transactions
+WHERE acct = ? AND tombstone = 0 AND cleared = 1 AND reconciled = 0
+ORDER BY date DESC, sort_order DESC;
+
+-- Get count of cleared but not yet reconciled transactions
+getClearedUnreconciledCount:
+SELECT COUNT(*) AS cnt FROM transactions
+WHERE acct = ? AND tombstone = 0 AND cleared = 1 AND reconciled = 0;
