@@ -334,3 +334,33 @@ SELECT * FROM category_groups;
 -- Get ALL transactions (including tombstoned)
 getAllTransactions:
 SELECT * FROM transactions;
+
+-- ============= OPTIMIZED QUERIES =============
+
+-- Spending aggregation by category for a date range (on-budget accounts only)
+-- Returns categoryId -> total spent (negative for expenses)
+getSpentByCategory:
+SELECT category, SUM(amount) AS spent
+FROM transactions
+WHERE date >= ? AND date <= ?
+  AND acct IN (SELECT id FROM accounts WHERE offbudget = 0 AND tombstone = 0)
+  AND tombstone = 0
+  AND category IS NOT NULL
+GROUP BY category;
+
+-- Categories with their group info pre-joined (for budget views)
+-- Returns categories ordered by group then category sort order
+getCategoriesWithGroups:
+SELECT c.id, c.name, c.cat_group, c.sort_order AS cat_sort, c.is_income, c.hidden AS cat_hidden,
+       g.id AS group_id, g.name AS group_name, g.sort_order AS group_sort, g.hidden AS group_hidden
+FROM categories c
+INNER JOIN category_groups g ON c.cat_group = g.id
+WHERE c.tombstone = 0 AND c.hidden = 0
+  AND g.tombstone = 0 AND g.hidden = 0
+ORDER BY g.sort_order, c.sort_order;
+
+-- Get account balance (sum of all transaction amounts for an account)
+getAccountBalance:
+SELECT COALESCE(SUM(amount), 0) AS balance
+FROM transactions
+WHERE acct = ? AND tombstone = 0;

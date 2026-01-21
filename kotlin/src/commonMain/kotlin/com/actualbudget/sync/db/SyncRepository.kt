@@ -418,6 +418,32 @@ class SyncRepository(private val db: ActualDatabase) {
     fun getBudgetForCategory(category: String) =
         db.actualDatabaseQueries.getBudgetForCategory(category).executeAsList()
 
+    /**
+     * Get spending totals by category for a date range.
+     * Only includes transactions from on-budget accounts.
+     * @param startDate Start date in YYYYMMDD format
+     * @param endDate End date in YYYYMMDD format
+     * @return List of (category, spent) pairs where spent is negative for expenses
+     */
+    fun getSpentByCategory(startDate: Long, endDate: Long) =
+        db.actualDatabaseQueries.getSpentByCategory(startDate, endDate).executeAsList()
+
+    /**
+     * Get categories with their group information pre-joined.
+     * Useful for budget views that need to display categories grouped.
+     * Only returns visible (non-hidden, non-tombstoned) categories and groups.
+     */
+    fun getCategoriesWithGroups() =
+        db.actualDatabaseQueries.getCategoriesWithGroups().executeAsList()
+
+    /**
+     * Get the balance for a specific account.
+     * @param accountId The account ID
+     * @return The sum of all transaction amounts for this account
+     */
+    fun getAccountBalance(accountId: String): Long =
+        db.actualDatabaseQueries.getAccountBalance(accountId).executeAsOne().toLong()
+
     fun getLastSyncTimestamp(): String? =
         db.actualDatabaseQueries.getLastTimestamp().executeAsOneOrNull()?.last_ts
 

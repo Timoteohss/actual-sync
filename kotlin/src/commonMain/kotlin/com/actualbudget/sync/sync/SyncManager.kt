@@ -534,6 +534,38 @@ class SyncManager(
     fun getBudgetForMonthSafe(month: Long) =
         database.actualDatabaseQueries.getBudgetForMonth(month).executeAsList()
 
+    /**
+     * Get spending totals by category for a date range (on-budget accounts only).
+     * This is an optimized query that performs aggregation in SQL rather than Swift.
+     *
+     * @param startDate Start date in YYYYMMDD format
+     * @param endDate End date in YYYYMMDD format
+     * @return List of (category, spent) pairs where spent is negative for expenses
+     */
+    @Throws(Exception::class)
+    fun getSpentByCategorySafe(startDate: Long, endDate: Long) =
+        database.actualDatabaseQueries.getSpentByCategory(startDate, endDate).executeAsList()
+
+    /**
+     * Get categories with their group information pre-joined.
+     * This is an optimized query that performs the JOIN in SQL rather than Swift.
+     * Only returns visible (non-hidden, non-tombstoned) categories and groups.
+     */
+    @Throws(Exception::class)
+    fun getCategoriesWithGroupsSafe() =
+        database.actualDatabaseQueries.getCategoriesWithGroups().executeAsList()
+
+    /**
+     * Get the balance for a specific account.
+     * This is an optimized query that performs SUM aggregation in SQL.
+     *
+     * @param accountId The account ID
+     * @return The sum of all transaction amounts for this account
+     */
+    @Throws(Exception::class)
+    fun getAccountBalanceSafe(accountId: String): Long =
+        database.actualDatabaseQueries.getAccountBalance(accountId).executeAsOne().toLong()
+
     // ========== Diagnostic Methods ==========
 
     /**
