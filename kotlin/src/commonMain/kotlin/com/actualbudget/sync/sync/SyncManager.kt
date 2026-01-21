@@ -559,9 +559,9 @@ class SyncManager(
      * @return List of matching transactions with payee_name and category_name included
      */
     @Throws(Exception::class)
-    fun searchTransactionsSafe(accountId: String, searchQuery: String): List<SearchTransactionsForAccount> {
+    fun searchTransactionsSafe(accountId: String, searchQuery: String) = run {
         val pattern = "%$searchQuery%"
-        return database.actualDatabaseQueries.searchTransactionsForAccount(
+        database.actualDatabaseQueries.searchTransactionsForAccount(
             accountId, pattern, pattern, pattern
         ).executeAsList()
     }
