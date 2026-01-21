@@ -373,7 +373,7 @@ class SyncEngine(
     private fun applyToTransaction(id: String, column: String, value: Any?) {
         val existing = db.actualDatabaseQueries.getTransactionById(id).executeAsOneOrNull()
         if (existing == null) {
-            db.actualDatabaseQueries.insertTransaction(id, null, null, 0, null, null, null, null, 0, 1)
+            db.actualDatabaseQueries.insertTransaction(id, null, null, 0, null, null, null, null, 0, 1, 0, 0)
         }
 
         val current = db.actualDatabaseQueries.getTransactionById(id).executeAsOne()
@@ -386,6 +386,8 @@ class SyncEngine(
             "notes" -> current.copy(notes = value as? String)
             "date" -> current.copy(date = value as? Long)
             "cleared" -> current.copy(cleared = (value as? Long))
+            "pending" -> current.copy(pending = (value as? Long))
+            "reconciled" -> current.copy(reconciled = (value as? Long))
             "sort_order" -> current.copy(sort_order = (value as? Long)?.toDouble())
             "tombstone" -> current.copy(tombstone = (value as? Long))
             // Ignore columns that don't exist in minimal schema
@@ -394,7 +396,8 @@ class SyncEngine(
 
         db.actualDatabaseQueries.insertTransaction(
             updated.id, updated.acct, updated.category, updated.amount ?: 0, updated.description,
-            updated.notes, updated.date, updated.sort_order, updated.tombstone ?: 0, updated.cleared ?: 1
+            updated.notes, updated.date, updated.sort_order, updated.tombstone ?: 0, updated.cleared ?: 1,
+            updated.pending ?: 0, updated.reconciled ?: 0
         )
     }
 

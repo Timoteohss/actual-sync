@@ -566,6 +566,95 @@ class SyncManager(
     fun getAccountBalanceSafe(accountId: String): Long =
         database.actualDatabaseQueries.getAccountBalance(accountId).executeAsOne().toLong()
 
+    // ========== Reconciliation Methods ==========
+
+    /**
+     * Get the cleared balance for an account (only cleared transactions).
+     * Used for reconciliation to compare against bank statement balance.
+     *
+     * @param accountId The account ID
+     * @return The sum of cleared transaction amounts
+     */
+    @Throws(Exception::class)
+    fun getClearedBalanceSafe(accountId: String): Long =
+        database.actualDatabaseQueries.getClearedBalance(accountId).executeAsOne().toLong()
+
+    /**
+     * Get uncleared transactions for an account.
+     * These are transactions that haven't been verified against bank statement.
+     *
+     * @param accountId The account ID
+     * @return List of uncleared transactions
+     */
+    @Throws(Exception::class)
+    fun getUnclearedTransactionsSafe(accountId: String) =
+        database.actualDatabaseQueries.getUnclearedTransactions(accountId).executeAsList()
+
+    /**
+     * Get the count of uncleared transactions for an account.
+     *
+     * @param accountId The account ID
+     * @return Number of uncleared transactions
+     */
+    @Throws(Exception::class)
+    fun getUnclearedCountSafe(accountId: String): Long =
+        database.actualDatabaseQueries.getUnclearedCount(accountId).executeAsOne()
+
+    /**
+     * Get reconciled (locked) transactions for an account.
+     * These are transactions that have been locked after reconciliation.
+     *
+     * @param accountId The account ID
+     * @return List of reconciled transactions
+     */
+    @Throws(Exception::class)
+    fun getReconciledTransactionsSafe(accountId: String) =
+        database.actualDatabaseQueries.getReconciledTransactions(accountId).executeAsList()
+
+    /**
+     * Get pending transactions for an account.
+     * These are transactions pending bank confirmation.
+     *
+     * @param accountId The account ID
+     * @return List of pending transactions
+     */
+    @Throws(Exception::class)
+    fun getPendingTransactionsSafe(accountId: String) =
+        database.actualDatabaseQueries.getPendingTransactions(accountId).executeAsList()
+
+    /**
+     * Get reconciliation summary for an account.
+     * Returns total balance, cleared balance, uncleared balance, and uncleared count.
+     *
+     * @param accountId The account ID
+     * @return Reconciliation summary with all balances
+     */
+    @Throws(Exception::class)
+    fun getReconciliationSummarySafe(accountId: String) =
+        database.actualDatabaseQueries.getReconciliationSummary(accountId).executeAsOne()
+
+    /**
+     * Toggle the cleared status of a transaction.
+     * Creates a sync change so it propagates to other devices.
+     *
+     * @param transactionId The transaction ID
+     * @param cleared The new cleared status (true = cleared, false = uncleared)
+     */
+    fun setTransactionCleared(transactionId: String, cleared: Boolean) {
+        engine.createChange("transactions", transactionId, "cleared", if (cleared) 1 else 0)
+    }
+
+    /**
+     * Toggle the reconciled (locked) status of a transaction.
+     * Creates a sync change so it propagates to other devices.
+     *
+     * @param transactionId The transaction ID
+     * @param reconciled The new reconciled status (true = locked, false = unlocked)
+     */
+    fun setTransactionReconciled(transactionId: String, reconciled: Boolean) {
+        engine.createChange("transactions", transactionId, "reconciled", if (reconciled) 1 else 0)
+    }
+
     // ========== Diagnostic Methods ==========
 
     /**

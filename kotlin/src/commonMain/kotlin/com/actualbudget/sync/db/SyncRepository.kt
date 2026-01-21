@@ -304,7 +304,9 @@ class SyncRepository(private val db: ActualDatabase) {
                 date = null,
                 sort_order = null,
                 tombstone = 0,
-                cleared = 1
+                cleared = 1,
+                pending = 0,
+                reconciled = 0
             )
         }
     }
@@ -323,6 +325,8 @@ class SyncRepository(private val db: ActualDatabase) {
             "notes" -> current.copy(notes = value as? String)
             "date" -> current.copy(date = (value as? Long))
             "cleared" -> current.copy(cleared = (value as? Long))
+            "pending" -> current.copy(pending = (value as? Long))
+            "reconciled" -> current.copy(reconciled = (value as? Long))
             "sort_order" -> current.copy(sort_order = (value as? Long)?.toDouble())
             "tombstone" -> current.copy(tombstone = (value as? Long))
             // Ignore columns that don't exist in minimal schema
@@ -339,7 +343,9 @@ class SyncRepository(private val db: ActualDatabase) {
             date = updated.date,
             sort_order = updated.sort_order,
             tombstone = updated.tombstone ?: 0,
-            cleared = updated.cleared ?: 1
+            cleared = updated.cleared ?: 1,
+            pending = updated.pending ?: 0,
+            reconciled = updated.reconciled ?: 0
         )
     }
 
