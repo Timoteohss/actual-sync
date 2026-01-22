@@ -200,7 +200,8 @@ class SyncRepository(private val db: ActualDatabase) {
                 id = id,
                 name = "",
                 category = null,
-                tombstone = 0
+                tombstone = 0,
+                transfer_acct = null
             )
         }
     }
@@ -208,9 +209,10 @@ class SyncRepository(private val db: ActualDatabase) {
     private fun applyPayeeColumn(id: String, column: String, value: Any?) {
         val current = db.actualDatabaseQueries.getPayeeById(id).executeAsOneOrNull() ?: return
         when (column) {
-            "name" -> db.actualDatabaseQueries.insertPayee(id, value as? String ?: "", current.category, current.tombstone)
-            "category" -> db.actualDatabaseQueries.insertPayee(id, current.name, value as? String, current.tombstone)
-            "tombstone" -> db.actualDatabaseQueries.insertPayee(id, current.name, current.category, (value as? Long) ?: 0L)
+            "name" -> db.actualDatabaseQueries.insertPayee(id, value as? String ?: "", current.category, current.tombstone, current.transfer_acct)
+            "category" -> db.actualDatabaseQueries.insertPayee(id, current.name, value as? String, current.tombstone, current.transfer_acct)
+            "tombstone" -> db.actualDatabaseQueries.insertPayee(id, current.name, current.category, (value as? Long) ?: 0L, current.transfer_acct)
+            "transfer_acct" -> db.actualDatabaseQueries.insertPayee(id, current.name, current.category, current.tombstone, value as? String)
         }
     }
 
@@ -309,7 +311,8 @@ class SyncRepository(private val db: ActualDatabase) {
                 reconciled = 0,
                 isParent = 0,
                 isChild = 0,
-                parent_id = null
+                parent_id = null,
+                transferred_id = null
             )
         }
     }
@@ -336,6 +339,8 @@ class SyncRepository(private val db: ActualDatabase) {
             "isParent", "is_parent" -> current.copy(isParent = (value as? Long))
             "isChild", "is_child" -> current.copy(isChild = (value as? Long))
             "parent_id" -> current.copy(parent_id = value as? String)
+            // Transfer transaction column
+            "transferred_id" -> current.copy(transferred_id = value as? String)
             // Ignore columns that don't exist in minimal schema
             else -> current
         }
@@ -355,7 +360,8 @@ class SyncRepository(private val db: ActualDatabase) {
             reconciled = updated.reconciled ?: 0,
             isParent = updated.isParent ?: 0,
             isChild = updated.isChild ?: 0,
-            parent_id = updated.parent_id
+            parent_id = updated.parent_id,
+            transferred_id = updated.transferred_id
         )
     }
 
