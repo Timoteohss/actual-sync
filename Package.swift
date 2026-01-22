@@ -16,8 +16,8 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "ActualSync",
-            url: "https://github.com/Timoteohss/actual-sync/releases/download/v0.4.2/ActualSync.xcframework.zip",
-            checksum: "6b2365e712b27442ee6892c996089537ab1e7308626abfe10f509ad80b0fdcc6"
+            url: "https://github.com/Timoteohss/actual-sync/releases/download/v0.4.4/ActualSync.xcframework.zip",
+            checksum: "82449e2fd677892fdd238bc96b986d893b96cb597e3d596af1eac66f8af4a88b"
         ),
     ]
 )
