@@ -860,6 +860,23 @@ class SyncManager(
         }
     }
 
+    /**
+     * Delete a split parent transaction along with all its children.
+     * This ensures orphaned children don't affect balance calculations.
+     *
+     * @param parentId The parent transaction ID to delete
+     */
+    fun deleteSplitParent(parentId: String) {
+        // First, delete all children
+        val children = database.actualDatabaseQueries.getChildTransactions(parentId).executeAsList()
+        for (child in children) {
+            engine.createChange("transactions", child.id, "tombstone", 1)
+        }
+
+        // Then delete the parent
+        engine.createChange("transactions", parentId, "tombstone", 1)
+    }
+
     // ========== Diagnostic Methods ==========
 
     /**
