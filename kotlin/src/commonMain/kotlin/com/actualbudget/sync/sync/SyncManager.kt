@@ -891,6 +891,283 @@ class SyncManager(
         engine.createChange("transactions", parentId, "tombstone", 1)
     }
 
+    // ========== Transfer Methods ==========
+
+    /**
+     * Get or create a transfer payee for an account.
+     * Transfer payees have an empty name and transfer_acct set to the account ID.
+     * They are used to represent transfers to/from that account.
+     *
+     * @param accountId The account ID this transfer payee represents
+     * @return The payee ID for transfers to this account
+     */
+    fun getOrCreateTransferPayee(accountId: String): String {
+        // Check if transfer payee already exists for this account
+        val existing = database.actualDatabaseQueries.getTransferPayeeForAccount(accountId).executeAsOneOrNull()
+        if (existing != null) {
+            return existing.id
+        }
+
+        // Create a new transfer payee
+        // Transfer payees have empty name and transfer_acct pointing to the account
+        val payeeId = generateUUID()
+        engine.createChange("payees", payeeId, "name", "")
+        engine.createChange("payees", payeeId, "transfer_acct", accountId)
+        engine.createChange("payees", payeeId, "tombstone", 0)
+        // Create payee_mapping entry (required for payee to be usable)
+        engine.createChange("payee_mapping", payeeId, "targetId", payeeId)
+        return payeeId
+    }
+
+    /**
+     * Check if a payee is a transfer payee.
+     *
+     * @param payeeId The payee ID to check
+     * @return true if this payee has transfer_acct set
+     */
+    fun isTransferPayee(payeeId: String): Boolean {
+        val payee = database.actualDatabaseQueries.getPayeeById(payeeId).executeAsOneOrNull()
+        return payee?.transfer_acct != null
+    }
+
+    /**
+     * Create a transfer between two accounts.
+     * Creates two linked transactions: one in each account with opposite amounts.
+     *
+     * @param fromAccountId Account money is leaving
+     * @param toAccountId Account money is going to
+     * @param amount Positive amount in cents (money going TO toAccount)
+     * @param date Date as YYYYMMDD integer
+     * @param notes Optional notes for the transfer
+     * @param cleared Whether the transactions should be cleared (default: true)
+     * @return Pair of (fromTxId, toTxId)
+     */
+    fun createTransfer(
+        fromAccountId: String,
+        toAccountId: String,
+        amount: Long,
+        date: Int,
+        notes: String? = null,
+        cleared: Boolean = true
+    ): Pair<String, String> {
+        // Get or create transfer payees for both accounts
+        val toAccountPayeeId = getOrCreateTransferPayee(toAccountId)
+        val fromAccountPayeeId = getOrCreateTransferPayee(fromAccountId)
+
+        // Generate IDs for both transactions
+        val fromTxId = generateUUID()
+        val toTxId = generateUUID()
+
+        // Create "from" transaction (negative amount - money leaving)
+        engine.createChange("transactions", fromTxId, "acct", fromAccountId)
+        engine.createChange("transactions", fromTxId, "date", date)
+        engine.createChange("transactions", fromTxId, "amount", -amount)  // Negative: money leaving
+        engine.createChange("transactions", fromTxId, "description", toAccountPayeeId)  // Payee points to destination
+        engine.createChange("transactions", fromTxId, "category", null)  // Transfers typically don't have categories
+        if (notes != null) engine.createChange("transactions", fromTxId, "notes", notes)
+        engine.createChange("transactions", fromTxId, "cleared", if (cleared) 1 else 0)
+        engine.createChange("transactions", fromTxId, "tombstone", 0)
+        engine.createChange("transactions", fromTxId, "transferred_id", toTxId)  // Link to paired transaction
+
+        // Create "to" transaction (positive amount - money arriving)
+        engine.createChange("transactions", toTxId, "acct", toAccountId)
+        engine.createChange("transactions", toTxId, "date", date)
+        engine.createChange("transactions", toTxId, "amount", amount)  // Positive: money arriving
+        engine.createChange("transactions", toTxId, "description", fromAccountPayeeId)  // Payee points to source
+        engine.createChange("transactions", toTxId, "category", null)
+        if (notes != null) engine.createChange("transactions", toTxId, "notes", notes)
+        engine.createChange("transactions", toTxId, "cleared", if (cleared) 1 else 0)
+        engine.createChange("transactions", toTxId, "tombstone", 0)
+        engine.createChange("transactions", toTxId, "transferred_id", fromTxId)  // Link to paired transaction
+
+        return Pair(fromTxId, toTxId)
+    }
+
+    /**
+     * Update the amount of a transfer.
+     * Automatically updates both sides with opposite amounts.
+     *
+     * @param transactionId Either side of the transfer
+     * @param newAmount New absolute amount in cents (will be positive on one side, negative on other)
+     */
+    fun updateTransferAmount(transactionId: String, newAmount: Long) {
+        val tx = database.actualDatabaseQueries.getTransactionById(transactionId).executeAsOneOrNull()
+            ?: return
+
+        val linkedId = tx.transferred_id ?: return
+
+        // Determine which side this is based on current amount sign
+        val isSourceSide = (tx.amount ?: 0) < 0
+
+        if (isSourceSide) {
+            // This is the "from" side (negative), linked is "to" side (positive)
+            engine.createChange("transactions", transactionId, "amount", -newAmount)
+            engine.createChange("transactions", linkedId, "amount", newAmount)
+        } else {
+            // This is the "to" side (positive), linked is "from" side (negative)
+            engine.createChange("transactions", transactionId, "amount", newAmount)
+            engine.createChange("transactions", linkedId, "amount", -newAmount)
+        }
+    }
+
+    /**
+     * Update the date of a transfer.
+     * Automatically updates both sides.
+     *
+     * @param transactionId Either side of the transfer
+     * @param newDate New date as YYYYMMDD integer
+     */
+    fun updateTransferDate(transactionId: String, newDate: Int) {
+        val tx = database.actualDatabaseQueries.getTransactionById(transactionId).executeAsOneOrNull()
+            ?: return
+
+        val linkedId = tx.transferred_id ?: return
+
+        // Update both sides
+        engine.createChange("transactions", transactionId, "date", newDate)
+        engine.createChange("transactions", linkedId, "date", newDate)
+    }
+
+    /**
+     * Update the notes of a transfer.
+     * Automatically updates both sides.
+     *
+     * @param transactionId Either side of the transfer
+     * @param newNotes New notes (can be null to clear)
+     */
+    fun updateTransferNotes(transactionId: String, newNotes: String?) {
+        val tx = database.actualDatabaseQueries.getTransactionById(transactionId).executeAsOneOrNull()
+            ?: return
+
+        val linkedId = tx.transferred_id ?: return
+
+        // Update both sides
+        engine.createChange("transactions", transactionId, "notes", newNotes)
+        engine.createChange("transactions", linkedId, "notes", newNotes)
+    }
+
+    /**
+     * Update the cleared status of a transfer.
+     * Automatically updates both sides.
+     *
+     * @param transactionId Either side of the transfer
+     * @param cleared New cleared status
+     */
+    fun updateTransferCleared(transactionId: String, cleared: Boolean) {
+        val tx = database.actualDatabaseQueries.getTransactionById(transactionId).executeAsOneOrNull()
+            ?: return
+
+        val linkedId = tx.transferred_id ?: return
+
+        // Update both sides
+        engine.createChange("transactions", transactionId, "cleared", if (cleared) 1 else 0)
+        engine.createChange("transactions", linkedId, "cleared", if (cleared) 1 else 0)
+    }
+
+    /**
+     * Delete a transfer (both sides).
+     * Sets tombstone=1 on both linked transactions.
+     *
+     * @param transactionId Either side of the transfer
+     */
+    fun deleteTransfer(transactionId: String) {
+        val tx = database.actualDatabaseQueries.getTransactionById(transactionId).executeAsOneOrNull()
+            ?: return
+
+        val linkedId = tx.transferred_id
+
+        // Clear the link on both sides first
+        engine.createChange("transactions", transactionId, "transferred_id", null)
+        if (linkedId != null) {
+            engine.createChange("transactions", linkedId, "transferred_id", null)
+        }
+
+        // Delete this transaction
+        engine.createChange("transactions", transactionId, "tombstone", 1)
+
+        // Delete the linked transaction
+        if (linkedId != null) {
+            engine.createChange("transactions", linkedId, "tombstone", 1)
+        }
+    }
+
+    /**
+     * Get the linked (paired) transaction ID for a transfer.
+     *
+     * @param transactionId The transaction to check
+     * @return The ID of the linked transaction, or null if not a transfer
+     */
+    fun getLinkedTransactionId(transactionId: String): String? {
+        val tx = database.actualDatabaseQueries.getTransactionById(transactionId).executeAsOneOrNull()
+        return tx?.transferred_id
+    }
+
+    /**
+     * Check if a transaction is a transfer.
+     *
+     * @param transactionId The transaction to check
+     * @return true if the transaction has a transferred_id
+     */
+    fun isTransferTransaction(transactionId: String): Boolean {
+        val tx = database.actualDatabaseQueries.getTransactionById(transactionId).executeAsOneOrNull()
+        return tx?.transferred_id != null
+    }
+
+    /**
+     * Generate a UUID for new entities.
+     */
+    private fun generateUUID(): String {
+        // Simple UUID generation - uses random hex characters
+        val chars = "0123456789abcdef"
+        val segments = listOf(8, 4, 4, 4, 12)
+        return segments.joinToString("-") { length ->
+            (1..length).map { chars.random() }.joinToString("")
+        }
+    }
+
+    // ========== Transfer Safe Methods for Swift Interop ==========
+
+    /**
+     * Get the transfer payee for an account (Swift-safe).
+     *
+     * @param accountId The account ID
+     * @return The transfer payee or null if not found
+     */
+    @Throws(Exception::class)
+    fun getTransferPayeeForAccountSafe(accountId: String) =
+        database.actualDatabaseQueries.getTransferPayeeForAccount(accountId).executeAsOneOrNull()
+
+    /**
+     * Check if a transaction is a transfer (Swift-safe).
+     *
+     * @param transactionId The transaction ID
+     * @return true if the transaction is a transfer
+     */
+    @Throws(Exception::class)
+    fun isTransferTransactionSafe(transactionId: String): Boolean {
+        val tx = database.actualDatabaseQueries.getTransactionById(transactionId).executeAsOneOrNull()
+        return tx?.transferred_id != null
+    }
+
+    /**
+     * Get the linked transaction for a transfer (Swift-safe).
+     *
+     * @param transactionId The transaction ID
+     * @return The linked transaction or null if not a transfer
+     */
+    @Throws(Exception::class)
+    fun getLinkedTransactionSafe(transactionId: String) =
+        database.actualDatabaseQueries.getLinkedTransaction(transactionId).executeAsOneOrNull()
+
+    /**
+     * Get all transfer payees (Swift-safe).
+     *
+     * @return List of payees that have transfer_acct set
+     */
+    @Throws(Exception::class)
+    fun getTransferPayeesSafe() =
+        database.actualDatabaseQueries.getPayeesWithTransferAcct().executeAsList()
+
     // ========== Diagnostic Methods ==========
 
     /**

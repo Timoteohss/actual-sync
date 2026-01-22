@@ -13,7 +13,8 @@ CREATE TABLE payees (
     id TEXT PRIMARY KEY NOT NULL,
     name TEXT,
     category TEXT,
-    tombstone INTEGER DEFAULT 0
+    tombstone INTEGER DEFAULT 0,
+    transfer_acct TEXT  -- Account ID if this is a transfer payee
 );
 
 -- Payee mapping rules (NOTE: No tombstone column - matches Actual Budget schema)
@@ -46,6 +47,7 @@ CREATE TABLE categories (
 -- Transactions (minimal columns that exist in all Actual versions)
 -- Note: 'description' column stores the payee ID (not the payee name)
 -- Split transactions: isParent=1 for parent, isChild=1 with parent_id for children
+-- Transfer transactions: transferred_id links to paired transaction in other account
 CREATE TABLE transactions (
     id TEXT PRIMARY KEY NOT NULL,
     acct TEXT,
@@ -61,7 +63,8 @@ CREATE TABLE transactions (
     reconciled INTEGER DEFAULT 0,
     isParent INTEGER DEFAULT 0,
     isChild INTEGER DEFAULT 0,
-    parent_id TEXT
+    parent_id TEXT,
+    transferred_id TEXT  -- Links to paired transfer transaction
 );
 
 -- Monthly budget amounts
@@ -151,8 +154,8 @@ getPayeeById:
 SELECT * FROM payees WHERE id = ?;
 
 insertPayee:
-INSERT OR REPLACE INTO payees(id, name, category, tombstone)
-VALUES (?, ?, ?, ?);
+INSERT OR REPLACE INTO payees(id, name, category, tombstone, transfer_acct)
+VALUES (?, ?, ?, ?, ?);
 
 -- Payee Mapping
 getPayeeMappingById:
@@ -307,8 +310,8 @@ getTransactionById:
 SELECT * FROM transactions WHERE id = ?;
 
 insertTransaction:
-INSERT OR REPLACE INTO transactions(id, acct, category, amount, description, notes, date, sort_order, tombstone, cleared, pending, reconciled, isParent, isChild, parent_id)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO transactions(id, acct, category, amount, description, notes, date, sort_order, tombstone, cleared, pending, reconciled, isParent, isChild, parent_id, transferred_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- Budget
 getBudgetForMonth:
@@ -357,7 +360,8 @@ WHERE id = ?2;
 updatePayeeColumn:
 UPDATE payees SET name = CASE WHEN ?1 = 'name' THEN ?3 ELSE name END,
                   category = CASE WHEN ?1 = 'category' THEN ?3 ELSE category END,
-                  tombstone = CASE WHEN ?1 = 'tombstone' THEN ?3 ELSE tombstone END
+                  tombstone = CASE WHEN ?1 = 'tombstone' THEN ?3 ELSE tombstone END,
+                  transfer_acct = CASE WHEN ?1 = 'transfer_acct' THEN ?3 ELSE transfer_acct END
 WHERE id = ?2;
 
 updateCategoryColumn:
@@ -391,7 +395,8 @@ UPDATE transactions SET acct = CASE WHEN ?1 = 'acct' THEN ?3 ELSE acct END,
                         sort_order = CASE WHEN ?1 = 'sort_order' THEN ?3 ELSE sort_order END,
                         isParent = CASE WHEN ?1 = 'isParent' OR ?1 = 'is_parent' THEN ?3 ELSE isParent END,
                         isChild = CASE WHEN ?1 = 'isChild' OR ?1 = 'is_child' THEN ?3 ELSE isChild END,
-                        parent_id = CASE WHEN ?1 = 'parent_id' THEN ?3 ELSE parent_id END
+                        parent_id = CASE WHEN ?1 = 'parent_id' THEN ?3 ELSE parent_id END,
+                        transferred_id = CASE WHEN ?1 = 'transferred_id' THEN ?3 ELSE transferred_id END
 WHERE id = ?2;
 
 -- Clear all data (for reset)
@@ -581,3 +586,29 @@ ORDER BY t.sort_order DESC;
 hasChildTransactions:
 SELECT COUNT(*) AS cnt FROM transactions
 WHERE parent_id = ? AND tombstone = 0;
+
+-- ============= TRANSFER QUERIES =============
+
+-- Get transfer payee for a specific account
+-- Transfer payees have transfer_acct pointing to the account they represent
+getTransferPayeeForAccount:
+SELECT * FROM payees WHERE transfer_acct = ? AND tombstone = 0;
+
+-- Get all transfer payees (payees with transfer_acct set)
+getPayeesWithTransferAcct:
+SELECT * FROM payees WHERE transfer_acct IS NOT NULL AND tombstone = 0;
+
+-- Check if a transaction is a transfer (has transferred_id set)
+isTransferTransaction:
+SELECT CASE WHEN transferred_id IS NOT NULL THEN 1 ELSE 0 END AS is_transfer
+FROM transactions WHERE id = ?;
+
+-- Get the linked (paired) transaction for a transfer
+getLinkedTransaction:
+SELECT * FROM transactions WHERE id = (
+    SELECT transferred_id FROM transactions WHERE id = ?
+);
+
+-- Get transaction with its transferred_id
+getTransactionWithTransfer:
+SELECT * FROM transactions WHERE id = ?;
