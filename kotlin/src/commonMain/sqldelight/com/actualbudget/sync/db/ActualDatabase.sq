@@ -198,6 +198,7 @@ SELECT * FROM transactions WHERE acct = ? AND tombstone = 0 AND isParent = 0 ORD
 -- All transactions for display including parents (for accordion grouping in UI)
 -- Use this for display, then group parents with their children in Swift
 -- Sort puts parents before their children (parent_id NULL first for parents)
+-- For transfer payees (transfer_acct set), resolves to account name instead of empty payee name
 getTransactionsForDisplayByAccount:
 SELECT
     t.id,
@@ -214,10 +215,11 @@ SELECT
     t.isParent,
     t.isChild,
     t.parent_id,
-    p.name AS payee_name,
+    COALESCE(transfer_acct.name, p.name) AS payee_name,
     c.name AS category_name
 FROM transactions t
 LEFT JOIN payees p ON t.description = p.id
+LEFT JOIN accounts transfer_acct ON p.transfer_acct = transfer_acct.id
 LEFT JOIN categories c ON t.category = c.id
 WHERE t.acct = ? AND t.tombstone = 0
 ORDER BY t.date DESC, t.sort_order DESC, t.isParent DESC;
@@ -225,6 +227,7 @@ ORDER BY t.date DESC, t.sort_order DESC, t.isParent DESC;
 -- Transactions with payee and category names pre-joined (optimized for list views)
 -- Eliminates N dictionary lookups in the UI layer
 -- Note: isParent = 0 filters out parent transactions to avoid double-counting splits
+-- For transfer payees (transfer_acct set), resolves to account name instead of empty payee name
 getTransactionsWithDetailsForAccount:
 SELECT
     t.id,
@@ -241,16 +244,18 @@ SELECT
     t.isParent,
     t.isChild,
     t.parent_id,
-    p.name AS payee_name,
+    COALESCE(transfer_acct.name, p.name) AS payee_name,
     c.name AS category_name
 FROM transactions t
 LEFT JOIN payees p ON t.description = p.id
+LEFT JOIN accounts transfer_acct ON p.transfer_acct = transfer_acct.id
 LEFT JOIN categories c ON t.category = c.id
 WHERE t.acct = ? AND t.tombstone = 0 AND t.isParent = 0
 ORDER BY t.date DESC, t.sort_order DESC;
 
 -- Paginated version with LIMIT and OFFSET for large accounts
 -- Note: isParent = 0 filters out parent transactions to avoid double-counting splits
+-- For transfer payees (transfer_acct set), resolves to account name instead of empty payee name
 getTransactionsWithDetailsPaginated:
 SELECT
     t.id,
@@ -267,10 +272,11 @@ SELECT
     t.isParent,
     t.isChild,
     t.parent_id,
-    p.name AS payee_name,
+    COALESCE(transfer_acct.name, p.name) AS payee_name,
     c.name AS category_name
 FROM transactions t
 LEFT JOIN payees p ON t.description = p.id
+LEFT JOIN accounts transfer_acct ON p.transfer_acct = transfer_acct.id
 LEFT JOIN categories c ON t.category = c.id
 WHERE t.acct = ? AND t.tombstone = 0 AND t.isParent = 0
 ORDER BY t.date DESC, t.sort_order DESC
@@ -278,6 +284,7 @@ LIMIT ? OFFSET ?;
 
 -- Search transactions with text matching (server-side search)
 -- Note: isParent = 0 filters out parent transactions to avoid double-counting splits
+-- For transfer payees (transfer_acct set), resolves to account name instead of empty payee name
 searchTransactionsForAccount:
 SELECT
     t.id,
@@ -294,10 +301,11 @@ SELECT
     t.isParent,
     t.isChild,
     t.parent_id,
-    p.name AS payee_name,
+    COALESCE(transfer_acct.name, p.name) AS payee_name,
     c.name AS category_name
 FROM transactions t
 LEFT JOIN payees p ON t.description = p.id
+LEFT JOIN accounts transfer_acct ON p.transfer_acct = transfer_acct.id
 LEFT JOIN categories c ON t.category = c.id
 WHERE t.acct = ? AND t.tombstone = 0 AND t.isParent = 0
   AND (p.name LIKE ? OR t.notes LIKE ? OR CAST(t.amount AS TEXT) LIKE ?)
@@ -558,6 +566,7 @@ WHERE parent_id = ? AND tombstone = 0
 ORDER BY sort_order DESC;
 
 -- Get child transactions with details for a parent
+-- For transfer payees (transfer_acct set), resolves to account name instead of empty payee name
 getChildTransactionsWithDetails:
 SELECT
     t.id,
@@ -574,10 +583,11 @@ SELECT
     t.isParent,
     t.isChild,
     t.parent_id,
-    p.name AS payee_name,
+    COALESCE(transfer_acct.name, p.name) AS payee_name,
     c.name AS category_name
 FROM transactions t
 LEFT JOIN payees p ON t.description = p.id
+LEFT JOIN accounts transfer_acct ON p.transfer_acct = transfer_acct.id
 LEFT JOIN categories c ON t.category = c.id
 WHERE t.parent_id = ? AND t.tombstone = 0
 ORDER BY t.sort_order DESC;
