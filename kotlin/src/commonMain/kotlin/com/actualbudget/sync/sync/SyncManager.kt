@@ -729,12 +729,26 @@ class SyncManager(
     /**
      * Mark multiple transactions as reconciled (locked) in one operation.
      * Creates sync changes for each transaction so they propagate to other devices.
+     * Also reconciles parent transactions when children are reconciled.
      *
      * @param transactionIds List of transaction IDs to reconcile
      */
     fun reconcileTransactions(transactionIds: List<String>) {
+        val parentIdsToReconcile = mutableSetOf<String>()
+
         for (id in transactionIds) {
             engine.createChange("transactions", id, "reconciled", 1)
+
+            // Check if this is a child transaction with a parent
+            val tx = database.actualDatabaseQueries.getTransactionById(id).executeAsOneOrNull()
+            tx?.parent_id?.let { parentId ->
+                parentIdsToReconcile.add(parentId)
+            }
+        }
+
+        // Also reconcile any parent transactions
+        for (parentId in parentIdsToReconcile) {
+            engine.createChange("transactions", parentId, "reconciled", 1)
         }
     }
 
