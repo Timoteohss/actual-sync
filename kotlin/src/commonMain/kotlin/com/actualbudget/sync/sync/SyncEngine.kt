@@ -373,7 +373,7 @@ class SyncEngine(
     private fun applyToTransaction(id: String, column: String, value: Any?) {
         val existing = db.actualDatabaseQueries.getTransactionById(id).executeAsOneOrNull()
         if (existing == null) {
-            db.actualDatabaseQueries.insertTransaction(id, null, null, 0, null, null, null, null, 0, 1, 0, 0)
+            db.actualDatabaseQueries.insertTransaction(id, null, null, 0, null, null, null, null, 0, 1, 0, 0, 0, 0, null)
         }
 
         val current = db.actualDatabaseQueries.getTransactionById(id).executeAsOne()
@@ -390,6 +390,10 @@ class SyncEngine(
             "reconciled" -> current.copy(reconciled = (value as? Long))
             "sort_order" -> current.copy(sort_order = (value as? Long)?.toDouble())
             "tombstone" -> current.copy(tombstone = (value as? Long))
+            // Split transaction columns
+            "isParent", "is_parent" -> current.copy(isParent = (value as? Long))
+            "isChild", "is_child" -> current.copy(isChild = (value as? Long))
+            "parent_id" -> current.copy(parent_id = value as? String)
             // Ignore columns that don't exist in minimal schema
             else -> current
         }
@@ -397,7 +401,7 @@ class SyncEngine(
         db.actualDatabaseQueries.insertTransaction(
             updated.id, updated.acct, updated.category, updated.amount ?: 0, updated.description,
             updated.notes, updated.date, updated.sort_order, updated.tombstone ?: 0, updated.cleared ?: 1,
-            updated.pending ?: 0, updated.reconciled ?: 0
+            updated.pending ?: 0, updated.reconciled ?: 0, updated.isParent ?: 0, updated.isChild ?: 0, updated.parent_id
         )
     }
 

@@ -727,6 +727,38 @@ class SyncManager(
         }
     }
 
+    // ========== Split Transaction Methods ==========
+
+    /**
+     * Get child transactions for a parent (split) transaction.
+     *
+     * @param parentId The parent transaction ID
+     * @return List of child transactions
+     */
+    @Throws(Exception::class)
+    fun getChildTransactionsSafe(parentId: String) =
+        database.actualDatabaseQueries.getChildTransactions(parentId).executeAsList()
+
+    /**
+     * Get child transactions with payee and category names pre-joined.
+     *
+     * @param parentId The parent transaction ID
+     * @return List of child transactions with payee_name and category_name
+     */
+    @Throws(Exception::class)
+    fun getChildTransactionsWithDetailsSafe(parentId: String) =
+        database.actualDatabaseQueries.getChildTransactionsWithDetails(parentId).executeAsList()
+
+    /**
+     * Check if a transaction has child transactions (is a split parent).
+     *
+     * @param transactionId The transaction ID to check
+     * @return true if the transaction has children
+     */
+    @Throws(Exception::class)
+    fun hasChildTransactionsSafe(transactionId: String): Boolean =
+        database.actualDatabaseQueries.hasChildTransactions(transactionId).executeAsOne() > 0
+
     // ========== Diagnostic Methods ==========
 
     /**

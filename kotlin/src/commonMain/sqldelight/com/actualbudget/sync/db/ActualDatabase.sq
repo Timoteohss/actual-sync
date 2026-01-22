@@ -45,6 +45,7 @@ CREATE TABLE categories (
 
 -- Transactions (minimal columns that exist in all Actual versions)
 -- Note: 'description' column stores the payee ID (not the payee name)
+-- Split transactions: isParent=1 for parent, isChild=1 with parent_id for children
 CREATE TABLE transactions (
     id TEXT PRIMARY KEY NOT NULL,
     acct TEXT,
@@ -57,7 +58,10 @@ CREATE TABLE transactions (
     tombstone INTEGER DEFAULT 0,
     cleared INTEGER DEFAULT 1,
     pending INTEGER DEFAULT 0,
-    reconciled INTEGER DEFAULT 0
+    reconciled INTEGER DEFAULT 0,
+    isParent INTEGER DEFAULT 0,
+    isChild INTEGER DEFAULT 0,
+    parent_id TEXT
 );
 
 -- Monthly budget amounts
@@ -184,11 +188,13 @@ INSERT OR REPLACE INTO categories(id, name, cat_group, is_income, sort_order, hi
 VALUES (?, ?, ?, ?, ?, ?, ?);
 
 -- Transactions
+-- Note: isParent = 0 filters out parent transactions to avoid double-counting splits
 getTransactionsByAccount:
-SELECT * FROM transactions WHERE acct = ? AND tombstone = 0 ORDER BY date DESC, sort_order DESC;
+SELECT * FROM transactions WHERE acct = ? AND tombstone = 0 AND isParent = 0 ORDER BY date DESC, sort_order DESC;
 
 -- Transactions with payee and category names pre-joined (optimized for list views)
 -- Eliminates N dictionary lookups in the UI layer
+-- Note: isParent = 0 filters out parent transactions to avoid double-counting splits
 getTransactionsWithDetailsForAccount:
 SELECT
     t.id,
@@ -202,15 +208,19 @@ SELECT
     t.cleared,
     t.pending,
     t.reconciled,
+    t.isParent,
+    t.isChild,
+    t.parent_id,
     p.name AS payee_name,
     c.name AS category_name
 FROM transactions t
 LEFT JOIN payees p ON t.description = p.id
 LEFT JOIN categories c ON t.category = c.id
-WHERE t.acct = ? AND t.tombstone = 0
+WHERE t.acct = ? AND t.tombstone = 0 AND t.isParent = 0
 ORDER BY t.date DESC, t.sort_order DESC;
 
 -- Paginated version with LIMIT and OFFSET for large accounts
+-- Note: isParent = 0 filters out parent transactions to avoid double-counting splits
 getTransactionsWithDetailsPaginated:
 SELECT
     t.id,
@@ -224,16 +234,20 @@ SELECT
     t.cleared,
     t.pending,
     t.reconciled,
+    t.isParent,
+    t.isChild,
+    t.parent_id,
     p.name AS payee_name,
     c.name AS category_name
 FROM transactions t
 LEFT JOIN payees p ON t.description = p.id
 LEFT JOIN categories c ON t.category = c.id
-WHERE t.acct = ? AND t.tombstone = 0
+WHERE t.acct = ? AND t.tombstone = 0 AND t.isParent = 0
 ORDER BY t.date DESC, t.sort_order DESC
 LIMIT ? OFFSET ?;
 
 -- Search transactions with text matching (server-side search)
+-- Note: isParent = 0 filters out parent transactions to avoid double-counting splits
 searchTransactionsForAccount:
 SELECT
     t.id,
@@ -247,24 +261,27 @@ SELECT
     t.cleared,
     t.pending,
     t.reconciled,
+    t.isParent,
+    t.isChild,
+    t.parent_id,
     p.name AS payee_name,
     c.name AS category_name
 FROM transactions t
 LEFT JOIN payees p ON t.description = p.id
 LEFT JOIN categories c ON t.category = c.id
-WHERE t.acct = ? AND t.tombstone = 0
+WHERE t.acct = ? AND t.tombstone = 0 AND t.isParent = 0
   AND (p.name LIKE ? OR t.notes LIKE ? OR CAST(t.amount AS TEXT) LIKE ?)
 ORDER BY t.date DESC, t.sort_order DESC;
 
 getTransactionsByDateRange:
-SELECT * FROM transactions WHERE date >= ? AND date <= ? AND tombstone = 0 ORDER BY date DESC, sort_order DESC;
+SELECT * FROM transactions WHERE date >= ? AND date <= ? AND tombstone = 0 AND isParent = 0 ORDER BY date DESC, sort_order DESC;
 
 getTransactionById:
 SELECT * FROM transactions WHERE id = ?;
 
 insertTransaction:
-INSERT OR REPLACE INTO transactions(id, acct, category, amount, description, notes, date, sort_order, tombstone, cleared, pending, reconciled)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO transactions(id, acct, category, amount, description, notes, date, sort_order, tombstone, cleared, pending, reconciled, isParent, isChild, parent_id)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- Budget
 getBudgetForMonth:
@@ -344,7 +361,10 @@ UPDATE transactions SET acct = CASE WHEN ?1 = 'acct' THEN ?3 ELSE acct END,
                         pending = CASE WHEN ?1 = 'pending' THEN ?3 ELSE pending END,
                         reconciled = CASE WHEN ?1 = 'reconciled' THEN ?3 ELSE reconciled END,
                         tombstone = CASE WHEN ?1 = 'tombstone' THEN ?3 ELSE tombstone END,
-                        sort_order = CASE WHEN ?1 = 'sort_order' THEN ?3 ELSE sort_order END
+                        sort_order = CASE WHEN ?1 = 'sort_order' THEN ?3 ELSE sort_order END,
+                        isParent = CASE WHEN ?1 = 'isParent' OR ?1 = 'is_parent' THEN ?3 ELSE isParent END,
+                        isChild = CASE WHEN ?1 = 'isChild' OR ?1 = 'is_child' THEN ?3 ELSE isChild END,
+                        parent_id = CASE WHEN ?1 = 'parent_id' THEN ?3 ELSE parent_id END
 WHERE id = ?2;
 
 -- Clear all data (for reset)
@@ -412,12 +432,14 @@ SELECT * FROM transactions;
 
 -- Spending aggregation by category for a date range (on-budget accounts only)
 -- Returns categoryId -> total spent (negative for expenses)
+-- Note: isParent = 0 excludes parent transactions to avoid double-counting splits
 getSpentByCategory:
 SELECT category, SUM(amount) AS spent
 FROM transactions
 WHERE date >= ? AND date <= ?
   AND acct IN (SELECT id FROM accounts WHERE offbudget = 0 AND tombstone = 0)
   AND tombstone = 0
+  AND isParent = 0
   AND category IS NOT NULL
 GROUP BY category;
 
@@ -433,44 +455,47 @@ WHERE c.tombstone = 0 AND c.hidden = 0
 ORDER BY g.sort_order, c.sort_order;
 
 -- Get account balance (sum of all transaction amounts for an account)
+-- Note: isParent = 0 excludes parent transactions to avoid double-counting splits
 getAccountBalance:
 SELECT COALESCE(SUM(amount), 0) AS balance
 FROM transactions
-WHERE acct = ? AND tombstone = 0;
+WHERE acct = ? AND tombstone = 0 AND isParent = 0;
 
 -- ============= RECONCILIATION QUERIES =============
 
 -- Get cleared balance for an account (only cleared transactions, for reconciliation)
+-- Note: isParent = 0 excludes parent transactions to avoid double-counting splits
 getClearedBalance:
 SELECT COALESCE(SUM(amount), 0) AS balance
 FROM transactions
-WHERE acct = ? AND tombstone = 0 AND cleared = 1;
+WHERE acct = ? AND tombstone = 0 AND cleared = 1 AND isParent = 0;
 
 -- Get uncleared transactions for an account (for reconciliation view)
 getUnclearedTransactions:
 SELECT * FROM transactions
-WHERE acct = ? AND tombstone = 0 AND cleared = 0
+WHERE acct = ? AND tombstone = 0 AND cleared = 0 AND isParent = 0
 ORDER BY date DESC, sort_order DESC;
 
 -- Get uncleared transaction count for an account
 getUnclearedCount:
 SELECT COUNT(*) AS cnt FROM transactions
-WHERE acct = ? AND tombstone = 0 AND cleared = 0;
+WHERE acct = ? AND tombstone = 0 AND cleared = 0 AND isParent = 0;
 
 -- Get reconciled transactions for an account (locked after reconciliation)
 getReconciledTransactions:
 SELECT * FROM transactions
-WHERE acct = ? AND tombstone = 0 AND reconciled = 1
+WHERE acct = ? AND tombstone = 0 AND reconciled = 1 AND isParent = 0
 ORDER BY date DESC, sort_order DESC;
 
 -- Get transactions pending bank confirmation
 getPendingTransactions:
 SELECT * FROM transactions
-WHERE acct = ? AND tombstone = 0 AND pending = 1
+WHERE acct = ? AND tombstone = 0 AND pending = 1 AND isParent = 0
 ORDER BY date DESC, sort_order DESC;
 
 -- Get reconciliation summary for an account
 -- Returns: total balance, cleared balance, uncleared balance, uncleared count
+-- Note: isParent = 0 excludes parent transactions to avoid double-counting splits
 getReconciliationSummary:
 SELECT
     COALESCE(SUM(amount), 0) AS total_balance,
@@ -478,16 +503,54 @@ SELECT
     COALESCE(SUM(CASE WHEN cleared = 0 THEN amount ELSE 0 END), 0) AS uncleared_balance,
     SUM(CASE WHEN cleared = 0 THEN 1 ELSE 0 END) AS uncleared_count
 FROM transactions
-WHERE acct = ? AND tombstone = 0;
+WHERE acct = ? AND tombstone = 0 AND isParent = 0;
 
 -- Get cleared but not yet reconciled transactions (for reconciliation)
 -- These are transactions ready to be locked during reconciliation
 getClearedUnreconciledTransactions:
 SELECT * FROM transactions
-WHERE acct = ? AND tombstone = 0 AND cleared = 1 AND reconciled = 0
+WHERE acct = ? AND tombstone = 0 AND cleared = 1 AND reconciled = 0 AND isParent = 0
 ORDER BY date DESC, sort_order DESC;
 
 -- Get count of cleared but not yet reconciled transactions
 getClearedUnreconciledCount:
 SELECT COUNT(*) AS cnt FROM transactions
-WHERE acct = ? AND tombstone = 0 AND cleared = 1 AND reconciled = 0;
+WHERE acct = ? AND tombstone = 0 AND cleared = 1 AND reconciled = 0 AND isParent = 0;
+
+-- ============= SPLIT TRANSACTION QUERIES =============
+
+-- Get child transactions for a parent (split) transaction
+getChildTransactions:
+SELECT * FROM transactions
+WHERE parent_id = ? AND tombstone = 0
+ORDER BY sort_order DESC;
+
+-- Get child transactions with details for a parent
+getChildTransactionsWithDetails:
+SELECT
+    t.id,
+    t.acct,
+    t.category,
+    t.amount,
+    t.description,
+    t.notes,
+    t.date,
+    t.sort_order,
+    t.cleared,
+    t.pending,
+    t.reconciled,
+    t.isParent,
+    t.isChild,
+    t.parent_id,
+    p.name AS payee_name,
+    c.name AS category_name
+FROM transactions t
+LEFT JOIN payees p ON t.description = p.id
+LEFT JOIN categories c ON t.category = c.id
+WHERE t.parent_id = ? AND t.tombstone = 0
+ORDER BY t.sort_order DESC;
+
+-- Check if a transaction is a parent (has children)
+hasChildTransactions:
+SELECT COUNT(*) AS cnt FROM transactions
+WHERE parent_id = ? AND tombstone = 0;

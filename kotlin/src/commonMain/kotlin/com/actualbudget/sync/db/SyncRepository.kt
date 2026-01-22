@@ -306,7 +306,10 @@ class SyncRepository(private val db: ActualDatabase) {
                 tombstone = 0,
                 cleared = 1,
                 pending = 0,
-                reconciled = 0
+                reconciled = 0,
+                isParent = 0,
+                isChild = 0,
+                parent_id = null
             )
         }
     }
@@ -329,6 +332,10 @@ class SyncRepository(private val db: ActualDatabase) {
             "reconciled" -> current.copy(reconciled = (value as? Long))
             "sort_order" -> current.copy(sort_order = (value as? Long)?.toDouble())
             "tombstone" -> current.copy(tombstone = (value as? Long))
+            // Split transaction columns
+            "isParent", "is_parent" -> current.copy(isParent = (value as? Long))
+            "isChild", "is_child" -> current.copy(isChild = (value as? Long))
+            "parent_id" -> current.copy(parent_id = value as? String)
             // Ignore columns that don't exist in minimal schema
             else -> current
         }
@@ -345,7 +352,10 @@ class SyncRepository(private val db: ActualDatabase) {
             tombstone = updated.tombstone ?: 0,
             cleared = updated.cleared ?: 1,
             pending = updated.pending ?: 0,
-            reconciled = updated.reconciled ?: 0
+            reconciled = updated.reconciled ?: 0,
+            isParent = updated.isParent ?: 0,
+            isChild = updated.isChild ?: 0,
+            parent_id = updated.parent_id
         )
     }
 
