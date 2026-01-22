@@ -192,6 +192,33 @@ VALUES (?, ?, ?, ?, ?, ?, ?);
 getTransactionsByAccount:
 SELECT * FROM transactions WHERE acct = ? AND tombstone = 0 AND isParent = 0 ORDER BY date DESC, sort_order DESC;
 
+-- All transactions for display including parents (for accordion grouping in UI)
+-- Use this for display, then group parents with their children in Swift
+-- Sort puts parents before their children (parent_id NULL first for parents)
+getTransactionsForDisplayByAccount:
+SELECT
+    t.id,
+    t.acct,
+    t.category,
+    t.amount,
+    t.description,
+    t.notes,
+    t.date,
+    t.sort_order,
+    t.cleared,
+    t.pending,
+    t.reconciled,
+    t.isParent,
+    t.isChild,
+    t.parent_id,
+    p.name AS payee_name,
+    c.name AS category_name
+FROM transactions t
+LEFT JOIN payees p ON t.description = p.id
+LEFT JOIN categories c ON t.category = c.id
+WHERE t.acct = ? AND t.tombstone = 0
+ORDER BY t.date DESC, t.sort_order DESC, t.isParent DESC;
+
 -- Transactions with payee and category names pre-joined (optimized for list views)
 -- Eliminates N dictionary lookups in the UI layer
 -- Note: isParent = 0 filters out parent transactions to avoid double-counting splits

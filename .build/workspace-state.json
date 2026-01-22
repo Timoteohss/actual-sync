@@ -13,9 +13,11 @@
           "location" : "/Users/timoteosousa/apps/actual-sync",
           "name" : "actual-sync"
         },
-        "path" : "/Users/timoteosousa/apps/actual-sync/kotlin/build/XCFrameworks/release/ActualSync.xcframework",
+        "path" : "/Users/timoteosousa/apps/actual-sync/.build/artifacts/actual-sync/ActualSync/ActualSync.xcframework",
         "source" : {
-          "type" : "local"
+          "checksum" : "9574d60ec0d10341d878914c9f4c0c6da6200b35be6d2af9646d0752b3268568",
+          "type" : "remote",
+          "url" : "https://github.com/Timoteohss/actual-sync/releases/download/v0.2.2/ActualSync.xcframework.zip"
         },
         "targetName" : "ActualSync"
       }

@@ -539,6 +539,17 @@ class SyncManager(
         database.actualDatabaseQueries.getTransactionsWithDetailsForAccount(accountId).executeAsList()
 
     /**
+     * Get all transactions for display including parents (for accordion grouping).
+     * Use this for UI display, then group parents with their children in Swift.
+     *
+     * @param accountId The account ID
+     * @return List of all transactions with payee and category names
+     */
+    @Throws(Exception::class)
+    fun getTransactionsForDisplaySafe(accountId: String) =
+        database.actualDatabaseQueries.getTransactionsForDisplayByAccount(accountId).executeAsList()
+
+    /**
      * Get transactions with details, paginated for large accounts.
      *
      * @param accountId The account ID
