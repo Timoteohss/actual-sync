@@ -759,6 +759,96 @@ class SyncManager(
     fun hasChildTransactionsSafe(transactionId: String): Boolean =
         database.actualDatabaseQueries.hasChildTransactions(transactionId).executeAsOne() > 0
 
+    /**
+     * Convert an existing transaction to a split parent.
+     * Sets isParent = 1 and clears the category (parent shouldn't have a category).
+     *
+     * @param transactionId The transaction ID to convert
+     */
+    fun convertToSplitParent(transactionId: String) {
+        engine.createChange("transactions", transactionId, "isParent", 1)
+        engine.createChange("transactions", transactionId, "category", null)
+    }
+
+    /**
+     * Create a child transaction for a split.
+     * The child inherits account, date, payee, cleared, reconciled from parent.
+     *
+     * @param id The new child transaction ID
+     * @param parentId The parent transaction ID
+     * @param amount The amount for this split (in cents)
+     * @param categoryId The category for this split
+     * @param accountId The account ID (inherited from parent)
+     * @param date The date (inherited from parent)
+     * @param payeeId The payee ID (inherited from parent, optional)
+     * @param cleared Whether the transaction is cleared (inherited from parent)
+     * @param reconciled Whether the transaction is reconciled (inherited from parent)
+     * @return The child transaction ID
+     */
+    fun createChildTransaction(
+        id: String,
+        parentId: String,
+        amount: Long,
+        categoryId: String?,
+        accountId: String,
+        date: Int,
+        payeeId: String? = null,
+        cleared: Boolean = true,
+        reconciled: Boolean = false
+    ): String {
+        engine.createChange("transactions", id, "acct", accountId)
+        engine.createChange("transactions", id, "date", date)
+        engine.createChange("transactions", id, "amount", amount)
+        engine.createChange("transactions", id, "description", payeeId)
+        engine.createChange("transactions", id, "category", categoryId)
+        engine.createChange("transactions", id, "cleared", if (cleared) 1 else 0)
+        engine.createChange("transactions", id, "reconciled", if (reconciled) 1 else 0)
+        engine.createChange("transactions", id, "tombstone", 0)
+        engine.createChange("transactions", id, "isChild", 1)
+        engine.createChange("transactions", id, "parent_id", parentId)
+        return id
+    }
+
+    /**
+     * Delete a child transaction from a split.
+     * If this is the last child, also converts the parent back to a regular transaction.
+     *
+     * @param childId The child transaction ID to delete
+     */
+    fun deleteChildTransaction(childId: String) {
+        // Get the child to find its parent
+        val child = database.actualDatabaseQueries.getTransactionById(childId).executeAsOneOrNull()
+        val parentId = child?.parent_id
+
+        // Delete the child (tombstone it)
+        engine.createChange("transactions", childId, "tombstone", 1)
+
+        // Check if parent has any remaining children
+        if (parentId != null) {
+            val remainingChildren = database.actualDatabaseQueries.hasChildTransactions(parentId).executeAsOne()
+            if (remainingChildren <= 1) {
+                // This was the last child (or will be after tombstone), convert parent back to normal
+                engine.createChange("transactions", parentId, "isParent", 0)
+            }
+        }
+    }
+
+    /**
+     * Update a child transaction's amount or category.
+     *
+     * @param childId The child transaction ID
+     * @param amount New amount (optional)
+     * @param categoryId New category (optional)
+     */
+    fun updateChildTransaction(childId: String, amount: Long? = null, categoryId: String? = null) {
+        if (amount != null) {
+            engine.createChange("transactions", childId, "amount", amount)
+        }
+        if (categoryId != null) {
+            engine.createChange("transactions", childId, "category", categoryId)
+        }
+    }
+
     // ========== Diagnostic Methods ==========
 
     /**
