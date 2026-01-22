@@ -1,23 +1,11 @@
 name: Kotlin
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - 'Package.swift'
-      - '*.md'
-      - 'docs/**'
-  pull_request:
-    branches: [main]
-    paths-ignore:
-      - 'Package.swift'
-      - '*.md'
-      - 'docs/**'
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version (e.g., 0.3.0)'
-        required: true
+        description: 'Release version (e.g., 0.3.0) - leave empty for build only'
+        required: false
         type: string
 
 jobs:
@@ -35,6 +23,14 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
+
+      - name: Cache Konan
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('kotlin/build.gradle.kts') }}
+          restore-keys: |
+            konan-${{ runner.os }}-
 
       - name: Build
         working-directory: kotlin
@@ -58,7 +54,7 @@ jobs:
   release:
     needs: build
     runs-on: macos-14  # Need macOS for swift package compute-checksum
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event.inputs.version != ''
     permissions:
       contents: write
 
