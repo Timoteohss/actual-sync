@@ -312,10 +312,29 @@ class SyncManager(
 
     /**
      * Create a new category locally.
+     *
+     * @param id Category ID
+     * @param name Category name
+     * @param groupId Parent category group ID
+     * @param isIncome Whether this is an income category (default: false)
+     * @param sortOrder Optional sort order for display ordering
+     * @param hidden Whether the category is hidden (default: false)
      */
-    fun createCategory(id: String, name: String, groupId: String): String {
+    fun createCategory(
+        id: String,
+        name: String,
+        groupId: String,
+        isIncome: Boolean = false,
+        sortOrder: Double? = null,
+        hidden: Boolean = false
+    ): String {
         engine.createChange("categories", id, "name", name)
         engine.createChange("categories", id, "cat_group", groupId)
+        engine.createChange("categories", id, "is_income", if (isIncome) 1 else 0)
+        if (sortOrder != null) {
+            engine.createChange("categories", id, "sort_order", sortOrder)
+        }
+        engine.createChange("categories", id, "hidden", if (hidden) 1 else 0)
         engine.createChange("categories", id, "tombstone", 0)
         return id
     }
@@ -332,6 +351,46 @@ class SyncManager(
      */
     fun deleteCategory(id: String) {
         engine.createChange("categories", id, "tombstone", 1)
+    }
+
+    /**
+     * Create a new category group locally.
+     *
+     * @param id Category group ID
+     * @param name Category group name
+     * @param isIncome Whether this is an income group (default: false for expense)
+     * @param sortOrder Optional sort order for display ordering
+     * @param hidden Whether the group is hidden (default: false)
+     */
+    fun createCategoryGroup(
+        id: String,
+        name: String,
+        isIncome: Boolean = false,
+        sortOrder: Double? = null,
+        hidden: Boolean = false
+    ): String {
+        engine.createChange("category_groups", id, "name", name)
+        engine.createChange("category_groups", id, "is_income", if (isIncome) 1 else 0)
+        if (sortOrder != null) {
+            engine.createChange("category_groups", id, "sort_order", sortOrder)
+        }
+        engine.createChange("category_groups", id, "hidden", if (hidden) 1 else 0)
+        engine.createChange("category_groups", id, "tombstone", 0)
+        return id
+    }
+
+    /**
+     * Update a category group field.
+     */
+    fun updateCategoryGroup(id: String, field: String, value: Any?) {
+        engine.createChange("category_groups", id, field, value)
+    }
+
+    /**
+     * Delete a category group (set tombstone).
+     */
+    fun deleteCategoryGroup(id: String) {
+        engine.createChange("category_groups", id, "tombstone", 1)
     }
 
     /**
