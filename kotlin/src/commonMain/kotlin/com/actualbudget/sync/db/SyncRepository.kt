@@ -73,8 +73,8 @@ class SyncRepository(private val db: ActualDatabase) {
                 applyBudgetColumn(message.row, message.column, parsedValue)
             }
             "zero_budget_months" -> {
-                // Buffer amounts per month - not critical for basic budget display
-                // Can be implemented later for carryover feature
+                ensureBudgetMonthExists(message.row)
+                applyBudgetMonthColumn(message.row, message.column, parsedValue)
             }
             "schedules" -> {
                 // Handle schedules
@@ -418,6 +418,21 @@ class SyncRepository(private val db: ActualDatabase) {
         }
     }
 
+    // ========== Budget Month Operations ==========
+
+    private fun ensureBudgetMonthExists(id: String) {
+        val existing = db.actualDatabaseQueries.getBudgetMonth(id).executeAsOneOrNull()
+        if (existing == null) {
+            db.actualDatabaseQueries.insertBudgetMonth(id, 0)
+        }
+    }
+
+    private fun applyBudgetMonthColumn(id: String, column: String, value: Any?) {
+        when (column) {
+            "buffered" -> db.actualDatabaseQueries.insertBudgetMonth(id, (value as? Long) ?: 0L)
+        }
+    }
+
     // ========== Query Methods ==========
 
     fun getAccounts() = db.actualDatabaseQueries.getAccounts().executeAsList()
@@ -486,6 +501,7 @@ class SyncRepository(private val db: ActualDatabase) {
         db.actualDatabaseQueries.clearPayees()
         db.actualDatabaseQueries.clearAccounts()
         db.actualDatabaseQueries.clearBudgets()
+        db.actualDatabaseQueries.clearBudgetMonths()
         db.actualDatabaseQueries.clearMetadata()
     }
 }

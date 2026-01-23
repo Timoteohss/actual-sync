@@ -84,6 +84,12 @@ CREATE TABLE notes (
     note TEXT NOT NULL DEFAULT ''
 );
 
+-- Budget months table for hold operations (buffered amounts for zero-based budgeting)
+CREATE TABLE zero_budget_months (
+    id TEXT PRIMARY KEY NOT NULL,  -- month in "YYYYMM" format
+    buffered INTEGER NOT NULL DEFAULT 0
+);
+
 -- Schedules for recurring transactions
 CREATE TABLE schedules (
     id TEXT PRIMARY KEY NOT NULL,
@@ -432,6 +438,9 @@ DELETE FROM messages_crdt;
 clearMetadata:
 DELETE FROM sync_metadata;
 
+clearBudgetMonths:
+DELETE FROM zero_budget_months;
+
 -- Diagnostic queries (counts ALL rows, ignoring tombstone)
 countAllAccounts:
 SELECT COUNT(*) AS cnt FROM accounts;
@@ -622,3 +631,65 @@ SELECT * FROM transactions WHERE id = (
 -- Get transaction with its transferred_id
 getTransactionWithTransfer:
 SELECT * FROM transactions WHERE id = ?;
+
+-- ============= BUDGET MONTH QUERIES =============
+
+-- Insert or update budget month (for hold operations)
+insertBudgetMonth:
+INSERT OR REPLACE INTO zero_budget_months(id, buffered) VALUES (?, ?);
+
+-- Get budget month by ID
+getBudgetMonth:
+SELECT * FROM zero_budget_months WHERE id = ?;
+
+-- Get sum of spending by category for N previous months (for average calculation)
+-- Returns categoryId -> total spent (negative for expenses) and month count
+getSpentByCategoryForMonths:
+SELECT category, SUM(amount) AS total_spent, COUNT(DISTINCT (date / 100)) AS month_count
+FROM transactions
+WHERE date >= ? AND date < ?
+  AND acct IN (SELECT id FROM accounts WHERE offbudget = 0 AND tombstone = 0)
+  AND tombstone = 0
+  AND isParent = 0
+  AND category IS NOT NULL
+GROUP BY category;
+
+-- Get total income for a month (for calculating "to budget")
+-- Income is transactions in income categories (positive amounts)
+getTotalIncomeForMonth:
+SELECT COALESCE(SUM(t.amount), 0) AS total_income
+FROM transactions t
+INNER JOIN categories c ON t.category = c.id
+WHERE (t.date / 100) = ?
+  AND c.is_income = 1
+  AND t.tombstone = 0
+  AND t.isParent = 0
+  AND t.acct IN (SELECT id FROM accounts WHERE offbudget = 0 AND tombstone = 0);
+
+-- Get total budgeted for a month
+getTotalBudgetedForMonth:
+SELECT COALESCE(SUM(amount), 0) AS total_budgeted
+FROM zero_budgets
+WHERE month = ? AND tombstone = 0;
+
+-- ============= REORDERING QUERIES =============
+
+-- Get categories in a group ordered by sort_order
+getCategoriesInGroupOrdered:
+SELECT * FROM categories WHERE cat_group = ? AND tombstone = 0 ORDER BY sort_order;
+
+-- Get all category groups ordered by sort_order
+getCategoryGroupsOrdered:
+SELECT * FROM category_groups WHERE tombstone = 0 ORDER BY sort_order;
+
+-- Get on-budget accounts ordered by sort_order
+getOnBudgetAccountsOrdered:
+SELECT * FROM accounts WHERE offbudget = 0 AND closed = 0 AND tombstone = 0 ORDER BY sort_order;
+
+-- Get off-budget accounts ordered by sort_order
+getOffBudgetAccountsOrdered:
+SELECT * FROM accounts WHERE offbudget = 1 AND closed = 0 AND tombstone = 0 ORDER BY sort_order;
+
+-- Get closed accounts ordered by sort_order
+getClosedAccountsOrdered:
+SELECT * FROM accounts WHERE closed = 1 AND tombstone = 0 ORDER BY sort_order;

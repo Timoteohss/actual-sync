@@ -89,6 +89,8 @@ class SyncEngine(
             "categories" -> applyToCategory(row, column, parsedValue)
             "category_groups" -> applyToCategoryGroup(row, column, parsedValue)
             "transactions" -> applyToTransaction(row, column, parsedValue)
+            "zero_budgets" -> applyToBudget(row, column, parsedValue)
+            "zero_budget_months" -> applyToBudgetMonth(row, column, parsedValue)
         }
 
         // Update local merkle
@@ -275,6 +277,8 @@ class SyncEngine(
             "categories" -> applyToCategory(message.row, message.column, parsedValue)
             "category_groups" -> applyToCategoryGroup(message.row, message.column, parsedValue)
             "transactions" -> applyToTransaction(message.row, message.column, parsedValue)
+            "zero_budgets" -> applyToBudget(message.row, message.column, parsedValue)
+            "zero_budget_months" -> applyToBudgetMonth(message.row, message.column, parsedValue)
         }
     }
 
@@ -407,6 +411,67 @@ class SyncEngine(
             updated.pending ?: 0, updated.reconciled ?: 0, updated.isParent ?: 0, updated.isChild ?: 0, updated.parent_id,
             updated.transferred_id
         )
+    }
+
+    private fun applyToBudget(id: String, column: String, value: Any?) {
+        val existing = db.actualDatabaseQueries.getBudgetById(id).executeAsOneOrNull()
+        if (existing == null) {
+            // Parse month and category from id (format: "YYYYMM-categoryId")
+            val parts = id.split("-", limit = 2)
+            val month = parts.getOrNull(0)?.toLongOrNull() ?: 0L
+            val category = parts.getOrNull(1) ?: ""
+
+            db.actualDatabaseQueries.insertBudget(
+                id = id,
+                month = month,
+                category = category,
+                amount = 0,
+                carryover = 0,
+                goal = null,
+                tombstone = 0
+            )
+        }
+
+        val current = db.actualDatabaseQueries.getBudgetById(id).executeAsOne()
+        when (column) {
+            "month" -> db.actualDatabaseQueries.insertBudget(
+                id, (value as? Long) ?: current.month, current.category,
+                current.amount, current.carryover, current.goal, current.tombstone
+            )
+            "category" -> db.actualDatabaseQueries.insertBudget(
+                id, current.month, (value as? String) ?: current.category,
+                current.amount, current.carryover, current.goal, current.tombstone
+            )
+            "amount" -> db.actualDatabaseQueries.insertBudget(
+                id, current.month, current.category,
+                (value as? Long) ?: 0L, current.carryover, current.goal, current.tombstone
+            )
+            "carryover" -> db.actualDatabaseQueries.insertBudget(
+                id, current.month, current.category,
+                current.amount, (value as? Long) ?: 0L, current.goal, current.tombstone
+            )
+            "goal" -> db.actualDatabaseQueries.insertBudget(
+                id, current.month, current.category,
+                current.amount, current.carryover, value as? Long, current.tombstone
+            )
+            "tombstone" -> db.actualDatabaseQueries.insertBudget(
+                id, current.month, current.category,
+                current.amount, current.carryover, current.goal, (value as? Long) ?: 0L
+            )
+        }
+    }
+
+    private fun applyToBudgetMonth(id: String, column: String, value: Any?) {
+        // Ensure row exists
+        val existing = db.actualDatabaseQueries.getBudgetMonth(id).executeAsOneOrNull()
+        if (existing == null) {
+            db.actualDatabaseQueries.insertBudgetMonth(id, 0)
+        }
+
+        val current = db.actualDatabaseQueries.getBudgetMonth(id).executeAsOne()
+        when (column) {
+            "buffered" -> db.actualDatabaseQueries.insertBudgetMonth(id, (value as? Long) ?: 0L)
+        }
     }
 
     /**

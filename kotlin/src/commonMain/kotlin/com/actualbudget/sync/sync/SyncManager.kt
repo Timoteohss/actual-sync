@@ -393,6 +393,422 @@ class SyncManager(
         engine.createChange("category_groups", id, "tombstone", 1)
     }
 
+    // ========== Budget Methods ==========
+
+    /**
+     * Set the budget amount for a category in a specific month.
+     * This is the primary method for setting budget amounts.
+     *
+     * @param categoryId The category ID to set budget for
+     * @param month The month in YYYYMM format (e.g., 202501 for January 2025)
+     * @param amount The budget amount in cents (e.g., 50000 for $500.00)
+     */
+    fun setBudgetAmount(categoryId: String, month: Long, amount: Long) {
+        val budgetId = "$month-$categoryId"
+        engine.createChange("zero_budgets", budgetId, "month", month)
+        engine.createChange("zero_budgets", budgetId, "category", categoryId)
+        engine.createChange("zero_budgets", budgetId, "amount", amount)
+    }
+
+    /**
+     * Set a budget goal for a category in a specific month.
+     *
+     * @param categoryId The category ID
+     * @param month The month in YYYYMM format
+     * @param goal The goal amount in cents (or null to clear)
+     */
+    fun setBudgetGoal(categoryId: String, month: Long, goal: Long?) {
+        val budgetId = "$month-$categoryId"
+        engine.createChange("zero_budgets", budgetId, "month", month)
+        engine.createChange("zero_budgets", budgetId, "category", categoryId)
+        engine.createChange("zero_budgets", budgetId, "goal", goal)
+    }
+
+    /**
+     * Set the carryover amount for a category in a specific month.
+     * Carryover is used for envelope budgeting to carry unused funds to next month.
+     *
+     * @param categoryId The category ID
+     * @param month The month in YYYYMM format
+     * @param carryover The carryover amount in cents
+     */
+    fun setBudgetCarryover(categoryId: String, month: Long, carryover: Long) {
+        val budgetId = "$month-$categoryId"
+        engine.createChange("zero_budgets", budgetId, "month", month)
+        engine.createChange("zero_budgets", budgetId, "category", categoryId)
+        engine.createChange("zero_budgets", budgetId, "carryover", carryover)
+    }
+
+    /**
+     * Copy budget amounts from previous month to current month.
+     * Useful for quickly setting up a new month's budget.
+     *
+     * @param targetMonth The month to copy TO in YYYYMM format
+     */
+    fun copyBudgetFromPreviousMonth(targetMonth: Long) {
+        // Calculate previous month
+        val year = (targetMonth / 100).toInt()
+        val month = (targetMonth % 100).toInt()
+        val prevMonth = if (month == 1) {
+            ((year - 1) * 100 + 12).toLong()
+        } else {
+            (year * 100 + month - 1).toLong()
+        }
+
+        // Get budgets from previous month
+        val prevBudgets = database.actualDatabaseQueries.getBudgetForMonth(prevMonth).executeAsList()
+
+        // Copy each budget to target month
+        for (budget in prevBudgets) {
+            if (budget.tombstone == 0L) {
+                setBudgetAmount(budget.category, targetMonth, budget.amount)
+            }
+        }
+    }
+
+    /**
+     * Set all budget amounts for a month to zero.
+     *
+     * @param month The month in YYYYMM format
+     */
+    fun zeroBudgetsForMonth(month: Long) {
+        val budgets = database.actualDatabaseQueries.getBudgetForMonth(month).executeAsList()
+        for (budget in budgets) {
+            if (budget.tombstone == 0L) {
+                setBudgetAmount(budget.category, month, 0)
+            }
+        }
+    }
+
+    /**
+     * Transfer budget amount from one category to another within the same month.
+     *
+     * @param fromCategoryId Source category ID
+     * @param toCategoryId Destination category ID
+     * @param month The month in YYYYMM format
+     * @param amount Amount to transfer in cents
+     */
+    fun transferBudget(fromCategoryId: String, toCategoryId: String, month: Long, amount: Long) {
+        // Get current budgets
+        val fromBudgetId = "$month-$fromCategoryId"
+        val toBudgetId = "$month-$toCategoryId"
+
+        val fromBudget = database.actualDatabaseQueries.getBudgetById(fromBudgetId).executeAsOneOrNull()
+        val toBudget = database.actualDatabaseQueries.getBudgetById(toBudgetId).executeAsOneOrNull()
+
+        val fromAmount = fromBudget?.amount ?: 0L
+        val toAmount = toBudget?.amount ?: 0L
+
+        // Update both categories
+        setBudgetAmount(fromCategoryId, month, fromAmount - amount)
+        setBudgetAmount(toCategoryId, month, toAmount + amount)
+    }
+
+    // ========== Reordering Methods ==========
+
+    /**
+     * Move a category to a new position within a group or to a different group.
+     *
+     * @param categoryId The category to move
+     * @param newGroupId The target group (can be same as current)
+     * @param targetCategoryId The category to insert before, or null to append at end
+     */
+    fun moveCategory(categoryId: String, newGroupId: String, targetCategoryId: String?) {
+        // Get categories in target group
+        val categoriesInGroup = database.actualDatabaseQueries
+            .getCategoriesInGroupOrdered(newGroupId)
+            .executeAsList()
+            .filter { it.id != categoryId } // Exclude the category being moved
+            .map { it.id to it.sort_order }
+
+        // Calculate new sort order
+        val newSortOrder = BudgetUtils.calculateNewSortOrder(categoriesInGroup, targetCategoryId)
+
+        // Update the category
+        engine.createChange("categories", categoryId, "sort_order", newSortOrder.toLong())
+        engine.createChange("categories", categoryId, "cat_group", newGroupId)
+    }
+
+    /**
+     * Move a category group to a new position.
+     *
+     * @param groupId The category group to move
+     * @param targetGroupId The group to insert before, or null to append at end
+     */
+    fun moveCategoryGroup(groupId: String, targetGroupId: String?) {
+        // Get all category groups
+        val groups = database.actualDatabaseQueries
+            .getCategoryGroupsOrdered()
+            .executeAsList()
+            .filter { it.id != groupId } // Exclude the group being moved
+            .map { it.id to it.sort_order }
+
+        // Calculate new sort order
+        val newSortOrder = BudgetUtils.calculateNewSortOrder(groups, targetGroupId)
+
+        // Update the group
+        engine.createChange("category_groups", groupId, "sort_order", newSortOrder.toLong())
+    }
+
+    /**
+     * Move an account to a new position within its category (on-budget, off-budget, or closed).
+     *
+     * @param accountId The account to move
+     * @param targetAccountId The account to insert before, or null to append at end
+     */
+    fun moveAccount(accountId: String, targetAccountId: String?) {
+        // Get the account to determine its type
+        val account = database.actualDatabaseQueries.getAccountById(accountId).executeAsOneOrNull()
+            ?: return
+
+        // Get accounts of same type
+        val accounts = when {
+            account.closed == 1L -> database.actualDatabaseQueries.getClosedAccountsOrdered().executeAsList()
+            account.offbudget == 1L -> database.actualDatabaseQueries.getOffBudgetAccountsOrdered().executeAsList()
+            else -> database.actualDatabaseQueries.getOnBudgetAccountsOrdered().executeAsList()
+        }
+            .filter { it.id != accountId }
+            .map { it.id to it.sort_order }
+
+        // Calculate new sort order
+        val newSortOrder = BudgetUtils.calculateNewSortOrder(accounts, targetAccountId)
+
+        // Update the account
+        engine.createChange("accounts", accountId, "sort_order", newSortOrder.toLong())
+    }
+
+    /**
+     * Reopen a closed account.
+     *
+     * @param accountId The account to reopen
+     */
+    fun reopenAccount(accountId: String) {
+        engine.createChange("accounts", accountId, "closed", 0)
+    }
+
+    // ========== Advanced Budget Methods ==========
+
+    /**
+     * Copy budget from the previous month for a single category.
+     *
+     * @param categoryId The category to copy budget for
+     * @param month The target month in YYYYMM format
+     */
+    fun copySinglePreviousMonth(categoryId: String, month: Long) {
+        val prevMonth = BudgetUtils.calculatePreviousMonth(month)
+        val prevBudgetId = "$prevMonth-$categoryId"
+        val prevBudget = database.actualDatabaseQueries.getBudgetById(prevBudgetId).executeAsOneOrNull()
+        val amount = prevBudget?.amount ?: 0L
+        setBudgetAmount(categoryId, month, amount)
+    }
+
+    /**
+     * Set the budget for a category based on N-month spending average.
+     *
+     * @param categoryId The category to set budget for
+     * @param month The target month in YYYYMM format
+     * @param n Number of months to average
+     */
+    fun setNMonthAverage(categoryId: String, month: Long, n: Int) {
+        val (startDate, endDate) = BudgetUtils.calculateDateRangeForPreviousMonths(month, n)
+        val spentData = database.actualDatabaseQueries
+            .getSpentByCategoryForMonths(startDate, endDate)
+            .executeAsList()
+
+        val categoryData = spentData.find { it.category == categoryId }
+        val totalSpent: Long = categoryData?.total_spent?.toLong() ?: 0L
+
+        // Get category to check if it's income
+        val category = database.actualDatabaseQueries.getCategoryById(categoryId).executeAsOneOrNull()
+
+        // Calculate average (spent is negative for expenses)
+        val nLong: Long = n.toLong()
+        var avg: Long = totalSpent / nLong
+
+        // For expense categories, negate to make budget positive
+        if (category?.is_income == 0L) {
+            avg = -avg
+        }
+
+        setBudgetAmount(categoryId, month, avg)
+    }
+
+    /**
+     * Set 3-month average budget for all visible categories.
+     *
+     * @param month The target month in YYYYMM format
+     */
+    fun set3MonthAverage(month: Long) = setAllCategoriesNMonthAverage(month, 3)
+
+    /**
+     * Set 6-month average budget for all visible categories.
+     *
+     * @param month The target month in YYYYMM format
+     */
+    fun set6MonthAverage(month: Long) = setAllCategoriesNMonthAverage(month, 6)
+
+    /**
+     * Set 12-month average budget for all visible categories.
+     *
+     * @param month The target month in YYYYMM format
+     */
+    fun set12MonthAverage(month: Long) = setAllCategoriesNMonthAverage(month, 12)
+
+    /**
+     * Helper to set N-month average for all visible expense categories.
+     */
+    private fun setAllCategoriesNMonthAverage(month: Long, n: Int) {
+        val categories = database.actualDatabaseQueries.getCategories().executeAsList()
+            .filter { it.hidden == 0L && it.tombstone == 0L && it.is_income == 0L }
+
+        for (category in categories) {
+            setNMonthAverage(category.id, month, n)
+        }
+    }
+
+    // ========== Hold Operations ==========
+
+    /**
+     * Calculate the "To Budget" amount for a month.
+     * This is: total income - total budgeted + previous month carryover - current buffered.
+     *
+     * @param month The month in YYYYMM format
+     * @return The available amount to budget
+     */
+    fun calculateToBudget(month: Long): Long {
+        // Get total income for the month
+        val totalIncome = database.actualDatabaseQueries
+            .getTotalIncomeForMonth(month)
+            .executeAsOne()
+            .toLong()
+
+        // Get total budgeted for the month
+        val totalBudgeted = database.actualDatabaseQueries
+            .getTotalBudgetedForMonth(month)
+            .executeAsOne()
+            .toLong()
+
+        // Get current buffered amount
+        val monthId = month.toString()
+        val budgetMonth = database.actualDatabaseQueries.getBudgetMonth(monthId).executeAsOneOrNull()
+        val buffered = budgetMonth?.buffered ?: 0L
+
+        // Calculate to-budget (simplified - doesn't include previous month carryover for now)
+        return totalIncome - totalBudgeted - buffered
+    }
+
+    /**
+     * Hold money for next month.
+     * Sets aside part of the "To Budget" amount to be available next month.
+     *
+     * @param month The month in YYYYMM format
+     * @param amount The amount to hold (will be constrained to available)
+     * @return true if successful, false if not enough money to hold
+     */
+    fun holdForNextMonth(month: Long, amount: Long): Boolean {
+        val monthId = month.toString()
+        val current = database.actualDatabaseQueries.getBudgetMonth(monthId).executeAsOneOrNull()
+        val currentBuffered = current?.buffered ?: 0L
+
+        // Calculate available to-budget
+        val toBudget = calculateToBudget(month)
+
+        if (toBudget <= 0) return false
+
+        // Constrain amount: not negative, not more than available
+        val actualAmount = maxOf(0L, minOf(amount, toBudget))
+        val newBuffered = currentBuffered + actualAmount
+
+        engine.createChange("zero_budget_months", monthId, "buffered", newBuffered)
+        return true
+    }
+
+    /**
+     * Reset the hold amount for a month.
+     *
+     * @param month The month in YYYYMM format
+     */
+    fun resetHold(month: Long) {
+        engine.createChange("zero_budget_months", month.toString(), "buffered", 0)
+    }
+
+    // ========== Cover Operations ==========
+
+    /**
+     * Calculate the leftover (available) amount for a category in a month.
+     * Leftover = budgeted + spent (spent is negative for expenses).
+     *
+     * @param categoryId The category ID
+     * @param month The month in YYYYMM format
+     * @return The available/leftover amount (negative if overspent)
+     */
+    fun calculateCategoryLeftover(categoryId: String, month: Long): Long {
+        val budgetId = "$month-$categoryId"
+        val budget = database.actualDatabaseQueries.getBudgetById(budgetId).executeAsOneOrNull()
+        val budgeted = budget?.amount ?: 0L
+
+        val (startDate, endDate) = BudgetUtils.monthToDateRange(month)
+        val spentData = database.actualDatabaseQueries
+            .getSpentByCategory(startDate, endDate)
+            .executeAsList()
+
+        val spentResult = spentData.find { it.category == categoryId }
+        val spent: Long = spentResult?.spent?.toLong() ?: 0L
+
+        return budgeted + spent // spent is negative for expenses
+    }
+
+    /**
+     * Cover overspending in one category from another.
+     * Transfers budget from a category with available funds to cover overspending.
+     *
+     * @param fromCategoryId Category with available funds
+     * @param toCategoryId Overspent category to cover
+     * @param month The month in YYYYMM format
+     * @param amount Amount to cover (or null to cover full overspending)
+     */
+    fun coverOverspending(
+        fromCategoryId: String,
+        toCategoryId: String,
+        month: Long,
+        amount: Long? = null
+    ) {
+        val toLeftover = calculateCategoryLeftover(toCategoryId, month)
+        val fromLeftover = calculateCategoryLeftover(fromCategoryId, month)
+
+        // Only proceed if 'to' is overspent and 'from' has funds
+        if (toLeftover >= 0 || fromLeftover <= 0) return
+
+        val overspentAmount = -toLeftover // Make positive
+        val amountToCover = amount ?: overspentAmount
+        val coverableAmount = minOf(amountToCover, fromLeftover, overspentAmount)
+
+        // Transfer budget from -> to
+        val fromBudgetId = "$month-$fromCategoryId"
+        val toBudgetId = "$month-$toCategoryId"
+        val fromBudget = database.actualDatabaseQueries.getBudgetById(fromBudgetId).executeAsOneOrNull()?.amount ?: 0L
+        val toBudget = database.actualDatabaseQueries.getBudgetById(toBudgetId).executeAsOneOrNull()?.amount ?: 0L
+
+        setBudgetAmount(fromCategoryId, month, fromBudget - coverableAmount)
+        setBudgetAmount(toCategoryId, month, toBudget + coverableAmount)
+    }
+
+    /**
+     * Transfer available "To Budget" money to a category.
+     *
+     * @param amount Amount to transfer
+     * @param toCategoryId Target category
+     * @param month The month in YYYYMM format
+     */
+    fun transferAvailable(amount: Long, toCategoryId: String, month: Long) {
+        val toBudget = calculateToBudget(month)
+        val actualAmount = maxOf(0L, minOf(amount, toBudget))
+
+        val budgetId = "$month-$toCategoryId"
+        val currentBudget = database.actualDatabaseQueries.getBudgetById(budgetId).executeAsOneOrNull()?.amount ?: 0L
+        setBudgetAmount(toCategoryId, month, currentBudget + actualAmount)
+    }
+
     /**
      * Create a new transaction locally.
      *
@@ -495,6 +911,7 @@ class SyncManager(
                 "payee_mapping" -> if (count == 1) "payee mapping" else "payee mappings"
                 "categories" -> if (count == 1) "category" else "categories"
                 "category_groups" -> if (count == 1) "category group" else "category groups"
+                "zero_budgets" -> if (count == 1) "budget" else "budgets"
                 else -> dataset
             }
             summary.add("$count $entityName")
@@ -642,6 +1059,83 @@ class SyncManager(
     @Throws(Exception::class)
     fun getBudgetForMonthSafe(month: Long) =
         database.actualDatabaseQueries.getBudgetForMonth(month).executeAsList()
+
+    /**
+     * Safely get budget for a specific category - exceptions propagate to Swift as NSError.
+     */
+    @Throws(Exception::class)
+    fun getBudgetForCategorySafe(category: String) =
+        database.actualDatabaseQueries.getBudgetForCategory(category).executeAsList()
+
+    /**
+     * Safely get a specific budget entry by ID - exceptions propagate to Swift as NSError.
+     */
+    @Throws(Exception::class)
+    fun getBudgetByIdSafe(budgetId: String) =
+        database.actualDatabaseQueries.getBudgetById(budgetId).executeAsOneOrNull()
+
+    /**
+     * Set budget amount (Swift-safe wrapper).
+     * @param categoryId The category ID
+     * @param month The month in YYYYMM format
+     * @param amount The budget amount in cents
+     */
+    @Throws(Exception::class)
+    fun setBudgetAmountSafe(categoryId: String, month: Long, amount: Long) {
+        setBudgetAmount(categoryId, month, amount)
+    }
+
+    /**
+     * Set budget goal (Swift-safe wrapper).
+     * @param categoryId The category ID
+     * @param month The month in YYYYMM format
+     * @param goal The goal amount in cents (or null to clear)
+     */
+    @Throws(Exception::class)
+    fun setBudgetGoalSafe(categoryId: String, month: Long, goal: Long?) {
+        setBudgetGoal(categoryId, month, goal)
+    }
+
+    /**
+     * Set budget carryover (Swift-safe wrapper).
+     * @param categoryId The category ID
+     * @param month The month in YYYYMM format
+     * @param carryover The carryover amount in cents
+     */
+    @Throws(Exception::class)
+    fun setBudgetCarryoverSafe(categoryId: String, month: Long, carryover: Long) {
+        setBudgetCarryover(categoryId, month, carryover)
+    }
+
+    /**
+     * Copy budgets from previous month (Swift-safe wrapper).
+     * @param targetMonth The month to copy TO in YYYYMM format
+     */
+    @Throws(Exception::class)
+    fun copyBudgetFromPreviousMonthSafe(targetMonth: Long) {
+        copyBudgetFromPreviousMonth(targetMonth)
+    }
+
+    /**
+     * Zero all budgets for a month (Swift-safe wrapper).
+     * @param month The month in YYYYMM format
+     */
+    @Throws(Exception::class)
+    fun zeroBudgetsForMonthSafe(month: Long) {
+        zeroBudgetsForMonth(month)
+    }
+
+    /**
+     * Transfer budget between categories (Swift-safe wrapper).
+     * @param fromCategoryId Source category
+     * @param toCategoryId Destination category
+     * @param month The month in YYYYMM format
+     * @param amount Amount to transfer in cents
+     */
+    @Throws(Exception::class)
+    fun transferBudgetSafe(fromCategoryId: String, toCategoryId: String, month: Long, amount: Long) {
+        transferBudget(fromCategoryId, toCategoryId, month, amount)
+    }
 
     /**
      * Get spending totals by category for a date range (on-budget accounts only).
@@ -1226,6 +1720,199 @@ class SyncManager(
     @Throws(Exception::class)
     fun getTransferPayeesSafe() =
         database.actualDatabaseQueries.getPayeesWithTransferAcct().executeAsList()
+
+    // ========== Reordering Safe Methods ==========
+
+    /**
+     * Move a category to a new position (Swift-safe).
+     *
+     * @param categoryId The category to move
+     * @param newGroupId The target group
+     * @param targetCategoryId The category to insert before, or null to append
+     */
+    @Throws(Exception::class)
+    fun moveCategorySafe(categoryId: String, newGroupId: String, targetCategoryId: String?) {
+        moveCategory(categoryId, newGroupId, targetCategoryId)
+    }
+
+    /**
+     * Move a category group to a new position (Swift-safe).
+     *
+     * @param groupId The category group to move
+     * @param targetGroupId The group to insert before, or null to append
+     */
+    @Throws(Exception::class)
+    fun moveCategoryGroupSafe(groupId: String, targetGroupId: String?) {
+        moveCategoryGroup(groupId, targetGroupId)
+    }
+
+    /**
+     * Move an account to a new position (Swift-safe).
+     *
+     * @param accountId The account to move
+     * @param targetAccountId The account to insert before, or null to append
+     */
+    @Throws(Exception::class)
+    fun moveAccountSafe(accountId: String, targetAccountId: String?) {
+        moveAccount(accountId, targetAccountId)
+    }
+
+    /**
+     * Reopen a closed account (Swift-safe).
+     *
+     * @param accountId The account to reopen
+     */
+    @Throws(Exception::class)
+    fun reopenAccountSafe(accountId: String) {
+        reopenAccount(accountId)
+    }
+
+    // ========== Advanced Budget Safe Methods ==========
+
+    /**
+     * Copy budget from previous month for a single category (Swift-safe).
+     *
+     * @param categoryId The category to copy budget for
+     * @param month The target month in YYYYMM format
+     */
+    @Throws(Exception::class)
+    fun copySinglePreviousMonthSafe(categoryId: String, month: Long) {
+        copySinglePreviousMonth(categoryId, month)
+    }
+
+    /**
+     * Set budget based on N-month spending average (Swift-safe).
+     *
+     * @param categoryId The category to set budget for
+     * @param month The target month in YYYYMM format
+     * @param n Number of months to average
+     */
+    @Throws(Exception::class)
+    fun setNMonthAverageSafe(categoryId: String, month: Long, n: Int) {
+        setNMonthAverage(categoryId, month, n)
+    }
+
+    /**
+     * Set 3-month average budget for all visible categories (Swift-safe).
+     *
+     * @param month The target month in YYYYMM format
+     */
+    @Throws(Exception::class)
+    fun set3MonthAverageSafe(month: Long) {
+        set3MonthAverage(month)
+    }
+
+    /**
+     * Set 6-month average budget for all visible categories (Swift-safe).
+     *
+     * @param month The target month in YYYYMM format
+     */
+    @Throws(Exception::class)
+    fun set6MonthAverageSafe(month: Long) {
+        set6MonthAverage(month)
+    }
+
+    /**
+     * Set 12-month average budget for all visible categories (Swift-safe).
+     *
+     * @param month The target month in YYYYMM format
+     */
+    @Throws(Exception::class)
+    fun set12MonthAverageSafe(month: Long) {
+        set12MonthAverage(month)
+    }
+
+    // ========== Hold Operations Safe Methods ==========
+
+    /**
+     * Calculate the "To Budget" amount for a month (Swift-safe).
+     *
+     * @param month The month in YYYYMM format
+     * @return The available amount to budget
+     */
+    @Throws(Exception::class)
+    fun calculateToBudgetSafe(month: Long): Long {
+        return calculateToBudget(month)
+    }
+
+    /**
+     * Hold money for next month (Swift-safe).
+     *
+     * @param month The month in YYYYMM format
+     * @param amount The amount to hold
+     * @return true if successful, false if not enough money
+     */
+    @Throws(Exception::class)
+    fun holdForNextMonthSafe(month: Long, amount: Long): Boolean {
+        return holdForNextMonth(month, amount)
+    }
+
+    /**
+     * Reset the hold amount for a month (Swift-safe).
+     *
+     * @param month The month in YYYYMM format
+     */
+    @Throws(Exception::class)
+    fun resetHoldSafe(month: Long) {
+        resetHold(month)
+    }
+
+    /**
+     * Get the buffered (held) amount for a month (Swift-safe).
+     *
+     * @param month The month in YYYYMM format
+     * @return The buffered amount
+     */
+    @Throws(Exception::class)
+    fun getBufferedAmountSafe(month: Long): Long {
+        val monthId = month.toString()
+        val budgetMonth = database.actualDatabaseQueries.getBudgetMonth(monthId).executeAsOneOrNull()
+        return budgetMonth?.buffered ?: 0L
+    }
+
+    // ========== Cover Operations Safe Methods ==========
+
+    /**
+     * Calculate the leftover for a category (Swift-safe).
+     *
+     * @param categoryId The category ID
+     * @param month The month in YYYYMM format
+     * @return The available/leftover amount
+     */
+    @Throws(Exception::class)
+    fun calculateCategoryLeftoverSafe(categoryId: String, month: Long): Long {
+        return calculateCategoryLeftover(categoryId, month)
+    }
+
+    /**
+     * Cover overspending from one category to another (Swift-safe).
+     *
+     * @param fromCategoryId Category with available funds
+     * @param toCategoryId Overspent category to cover
+     * @param month The month in YYYYMM format
+     * @param amount Amount to cover (or null to cover full overspending)
+     */
+    @Throws(Exception::class)
+    fun coverOverspendingSafe(
+        fromCategoryId: String,
+        toCategoryId: String,
+        month: Long,
+        amount: Long?
+    ) {
+        coverOverspending(fromCategoryId, toCategoryId, month, amount)
+    }
+
+    /**
+     * Transfer available "To Budget" money to a category (Swift-safe).
+     *
+     * @param amount Amount to transfer
+     * @param toCategoryId Target category
+     * @param month The month in YYYYMM format
+     */
+    @Throws(Exception::class)
+    fun transferAvailableSafe(amount: Long, toCategoryId: String, month: Long) {
+        transferAvailable(amount, toCategoryId, month)
+    }
 
     // ========== Diagnostic Methods ==========
 
