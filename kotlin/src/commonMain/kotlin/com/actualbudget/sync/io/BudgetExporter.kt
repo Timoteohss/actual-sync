@@ -55,14 +55,23 @@ class BudgetExporter(
 
         try {
             println("[BudgetExporter] Preparing budget for upload: $budgetId")
+            println("[BudgetExporter] Source database path: $dbPath")
+            println("[BudgetExporter] Work directory: $workDir")
 
-            // Step 1: Create work directory using KmpIO and copy database
+            // Step 1: Create work directory and copy database
             if (fileManager.exists(workDir)) {
                 fileManager.delete(workDir)
             }
-            // KmpIO File.resolve() creates directory if it doesn't exist
-            val tempDirFile = File(tempDir)
-            tempDirFile.resolve(workDirName)
+
+            // Create work directory using KmpIO
+            val workDirFile = File(workDir)
+            workDirFile.makeDirectory()
+            println("[BudgetExporter] Created work directory")
+
+            // Verify source exists before copy
+            if (!fileManager.exists(dbPath)) {
+                throw Exception("Source database does not exist at: $dbPath")
+            }
 
             if (!fileManager.copy(dbPath, tempDbPath)) {
                 throw Exception("Failed to copy database to temp location")
