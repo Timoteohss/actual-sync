@@ -1,8 +1,8 @@
 import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
 
 plugins {
-    kotlin("multiplatform") version "2.1.0"
-    kotlin("plugin.serialization") version "2.1.0"
+    kotlin("multiplatform") version "2.3.0"
+    kotlin("plugin.serialization") version "2.3.0"
     id("com.android.library") version "8.7.3"
     id("app.cash.sqldelight") version "2.0.2"
 }
@@ -51,18 +51,18 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             // Coroutines
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.1")
 
             // Serialization
-            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+            implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.0")
 
             // Date/Time
-            implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.1")
+            implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.7.1")
 
             // HTTP Client
-            implementation("io.ktor:ktor-client-core:3.0.3")
-            implementation("io.ktor:ktor-client-content-negotiation:3.0.3")
-            implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.3")
+            implementation("io.ktor:ktor-client-core:3.1.0")
+            implementation("io.ktor:ktor-client-content-negotiation:3.1.0")
+            implementation("io.ktor:ktor-serialization-kotlinx-json:3.1.0")
 
             // UUID
             implementation("com.benasher44:uuid:0.8.4")
@@ -70,6 +70,9 @@ kotlin {
             // SQLDelight
             implementation("app.cash.sqldelight:runtime:2.0.2")
             implementation("app.cash.sqldelight:coroutines-extensions:2.0.2")
+
+            // KmpIO for ZIP file creation
+            implementation("io.github.skolson:kmp-io:0.3.0")
         }
 
         commonTest.dependencies {
@@ -78,7 +81,7 @@ kotlin {
         }
 
         androidMain.dependencies {
-            implementation("io.ktor:ktor-client-android:3.0.3")
+            implementation("io.ktor:ktor-client-android:3.1.0")
             implementation("app.cash.sqldelight:android-driver:2.0.2")
         }
 
@@ -91,14 +94,14 @@ kotlin {
             iosArm64Main.dependsOn(this)
             iosSimulatorArm64Main.dependsOn(this)
             dependencies {
-                implementation("io.ktor:ktor-client-darwin:3.0.3")
+                implementation("io.ktor:ktor-client-darwin:3.1.0")
                 implementation("app.cash.sqldelight:native-driver:2.0.2")
             }
         }
 
         val desktopMain by getting {
             dependencies {
-                implementation("io.ktor:ktor-client-cio:3.0.3")
+                implementation("io.ktor:ktor-client-cio:3.1.0")
                 implementation("app.cash.sqldelight:sqlite-driver:2.0.2")
             }
         }

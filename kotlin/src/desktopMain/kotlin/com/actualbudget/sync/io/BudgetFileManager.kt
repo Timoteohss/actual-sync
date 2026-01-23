@@ -60,4 +60,27 @@ actual class BudgetFileManager actual constructor() {
             false
         }
     }
+
+    actual fun readFile(path: String): ByteArray? {
+        return try {
+            File(path).readBytes()
+        } catch (e: Exception) {
+            println("[BudgetFileManager] Error reading file: ${e.message}")
+            null
+        }
+    }
+
+    actual fun writeFile(path: String, data: ByteArray): Boolean {
+        return try {
+            File(path).writeBytes(data)
+            true
+        } catch (e: Exception) {
+            println("[BudgetFileManager] Error writing file: ${e.message}")
+            false
+        }
+    }
+
+    actual fun getTempDir(): String {
+        return System.getProperty("java.io.tmpdir") ?: "/tmp"
+    }
 }

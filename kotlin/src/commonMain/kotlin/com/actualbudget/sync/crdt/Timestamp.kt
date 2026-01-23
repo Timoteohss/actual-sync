@@ -1,8 +1,8 @@
 package com.actualbudget.sync.crdt
 
 import com.benasher44.uuid.uuid4
-import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
+import kotlin.time.Clock
+import kotlin.time.Instant
 
 /**
  * Hybrid Unique Logical Clock (HULC) timestamp.

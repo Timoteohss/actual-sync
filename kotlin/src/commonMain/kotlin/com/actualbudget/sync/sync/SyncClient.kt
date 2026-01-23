@@ -143,6 +143,7 @@ class SyncClient(
     /**
      * Upload budget file to server.
      * @throws Exception if upload fails
+     * @return UploadResponse with status and groupId
      */
     @Throws(Exception::class)
     suspend fun uploadBudget(
@@ -150,7 +151,8 @@ class SyncClient(
         name: String,
         data: ByteArray,
         groupId: String? = null
-    ): String {
+    ): UploadResponse {
+        println("[SyncClient] Uploading budget: $fileId ($name), size: ${data.size} bytes")
         val response = httpClient.post("$serverUrl/sync/upload-user-file") {
             authToken?.let { header("X-ACTUAL-TOKEN", it) }
             header("X-ACTUAL-FILE-ID", fileId)
@@ -160,14 +162,33 @@ class SyncClient(
             setBody(data)
         }
 
+        println("[SyncClient] Upload response status: ${response.status}")
         if (!response.status.isSuccess()) {
             throw Exception("Failed to upload budget: ${response.status}")
         }
 
-        // Parse groupId from response
-        return groupId ?: ""
+        // Parse response body
+        val responseText = response.bodyAsText()
+        println("[SyncClient] Upload response body: $responseText")
+
+        return try {
+            json.decodeFromString<UploadResponse>(responseText)
+        } catch (e: Exception) {
+            println("[SyncClient] Failed to parse upload response: ${e.message}")
+            // Return a basic success response if parsing fails
+            UploadResponse(status = "ok", groupId = groupId)
+        }
     }
 }
+
+/**
+ * Response from budget upload operation.
+ */
+@Serializable
+data class UploadResponse(
+    val status: String,
+    val groupId: String? = null
+)
 
 // Response models for JSON parsing
 

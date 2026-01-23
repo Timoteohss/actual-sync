@@ -2,6 +2,7 @@ package com.actualbudget.sync.io
 
 import kotlinx.cinterop.*
 import platform.Foundation.*
+import platform.posix.memcpy
 import platform.posix.remove
 import platform.zlib.*
 
@@ -222,9 +223,44 @@ actual class BudgetFileManager actual constructor() {
         return NSFileManager.defaultManager.copyItemAtPath(source, toPath = destination, error = null)
     }
 
+    actual fun readFile(path: String): ByteArray? {
+        return try {
+            val nsData = NSData.dataWithContentsOfFile(path) ?: return null
+            nsData.toByteArray()
+        } catch (e: Exception) {
+            println("[BudgetFileManager] Error reading file: ${e.message}")
+            null
+        }
+    }
+
+    actual fun writeFile(path: String, data: ByteArray): Boolean {
+        return try {
+            val nsData = data.toNSData()
+            nsData.writeToFile(path, atomically = true)
+        } catch (e: Exception) {
+            println("[BudgetFileManager] Error writing file: ${e.message}")
+            false
+        }
+    }
+
+    actual fun getTempDir(): String {
+        return NSTemporaryDirectory().trimEnd('/')
+    }
+
     private fun ByteArray.toNSData(): NSData {
         return this.usePinned { pinned ->
             NSData.dataWithBytes(pinned.addressOf(0), this.size.toULong())
         }
+    }
+
+    private fun NSData.toByteArray(): ByteArray {
+        val length = this.length.toInt()
+        val bytes = ByteArray(length)
+        if (length > 0) {
+            bytes.usePinned { pinned ->
+                memcpy(pinned.addressOf(0), this.bytes, this.length)
+            }
+        }
+        return bytes
     }
 }
