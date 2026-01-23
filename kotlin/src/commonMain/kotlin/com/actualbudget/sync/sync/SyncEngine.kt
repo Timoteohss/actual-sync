@@ -288,10 +288,34 @@ class SyncEngine(
     private fun parseValue(value: String): Any? {
         return when {
             value.startsWith("S:") -> value.substring(2)
-            value.startsWith("N:") -> value.substring(2).toLongOrNull() ?: 0L
+            value.startsWith("N:") -> {
+                val numStr = value.substring(2)
+                // Try Long first (most common for money amounts)
+                numStr.toLongOrNull()
+                    // If that fails, try Double (for sort_order, etc.)
+                    ?: numStr.toDoubleOrNull()
+                    // Fallback with warning
+                    ?: run {
+                        println("[WARN] Failed to parse number: $numStr, defaulting to 0")
+                        0L
+                    }
+            }
             value.startsWith("0:") -> null
             value == "null" -> null
             else -> value
+        }
+    }
+
+    /**
+     * Safely convert a value to Double (for sort_order fields).
+     * Handles both Long and Double values from parseValue().
+     */
+    private fun toDoubleOrNull(value: Any?): Double? {
+        return when (value) {
+            is Double -> value
+            is Long -> value.toDouble()
+            is Number -> value.toDouble()
+            else -> null
         }
     }
 
@@ -309,7 +333,7 @@ class SyncEngine(
             "name" -> db.actualDatabaseQueries.insertAccount(id, value as? String ?: "", current.offbudget, current.closed, current.sort_order, current.tombstone)
             "offbudget" -> db.actualDatabaseQueries.insertAccount(id, current.name, (value as? Long) ?: 0L, current.closed, current.sort_order, current.tombstone)
             "closed" -> db.actualDatabaseQueries.insertAccount(id, current.name, current.offbudget, (value as? Long) ?: 0L, current.sort_order, current.tombstone)
-            "sort_order" -> db.actualDatabaseQueries.insertAccount(id, current.name, current.offbudget, current.closed, (value as? Long)?.toDouble(), current.tombstone)
+            "sort_order" -> db.actualDatabaseQueries.insertAccount(id, current.name, current.offbudget, current.closed, toDoubleOrNull(value), current.tombstone)
             "tombstone" -> db.actualDatabaseQueries.insertAccount(id, current.name, current.offbudget, current.closed, current.sort_order, (value as? Long) ?: 0L)
         }
     }
@@ -353,7 +377,7 @@ class SyncEngine(
             "name" -> db.actualDatabaseQueries.insertCategory(id, value as? String ?: "", current.cat_group, current.is_income, current.sort_order, current.hidden, current.tombstone)
             "cat_group" -> db.actualDatabaseQueries.insertCategory(id, current.name, value as? String, current.is_income, current.sort_order, current.hidden, current.tombstone)
             "is_income" -> db.actualDatabaseQueries.insertCategory(id, current.name, current.cat_group, (value as? Long) ?: 0L, current.sort_order, current.hidden, current.tombstone)
-            "sort_order" -> db.actualDatabaseQueries.insertCategory(id, current.name, current.cat_group, current.is_income, (value as? Long)?.toDouble(), current.hidden, current.tombstone)
+            "sort_order" -> db.actualDatabaseQueries.insertCategory(id, current.name, current.cat_group, current.is_income, toDoubleOrNull(value), current.hidden, current.tombstone)
             "hidden" -> db.actualDatabaseQueries.insertCategory(id, current.name, current.cat_group, current.is_income, current.sort_order, (value as? Long) ?: 0L, current.tombstone)
             "tombstone" -> db.actualDatabaseQueries.insertCategory(id, current.name, current.cat_group, current.is_income, current.sort_order, current.hidden, (value as? Long) ?: 0L)
         }
@@ -369,7 +393,7 @@ class SyncEngine(
         when (column) {
             "name" -> db.actualDatabaseQueries.insertCategoryGroup(id, value as? String ?: "", current.is_income, current.sort_order, current.hidden, current.tombstone)
             "is_income" -> db.actualDatabaseQueries.insertCategoryGroup(id, current.name, (value as? Long) ?: 0L, current.sort_order, current.hidden, current.tombstone)
-            "sort_order" -> db.actualDatabaseQueries.insertCategoryGroup(id, current.name, current.is_income, (value as? Long)?.toDouble(), current.hidden, current.tombstone)
+            "sort_order" -> db.actualDatabaseQueries.insertCategoryGroup(id, current.name, current.is_income, toDoubleOrNull(value), current.hidden, current.tombstone)
             "hidden" -> db.actualDatabaseQueries.insertCategoryGroup(id, current.name, current.is_income, current.sort_order, (value as? Long) ?: 0L, current.tombstone)
             "tombstone" -> db.actualDatabaseQueries.insertCategoryGroup(id, current.name, current.is_income, current.sort_order, current.hidden, (value as? Long) ?: 0L)
         }
@@ -393,7 +417,7 @@ class SyncEngine(
             "cleared" -> current.copy(cleared = (value as? Long))
             "pending" -> current.copy(pending = (value as? Long))
             "reconciled" -> current.copy(reconciled = (value as? Long))
-            "sort_order" -> current.copy(sort_order = (value as? Long)?.toDouble())
+            "sort_order" -> current.copy(sort_order = toDoubleOrNull(value))
             "tombstone" -> current.copy(tombstone = (value as? Long))
             // Split transaction columns
             "isParent", "is_parent" -> current.copy(isParent = (value as? Long))

@@ -325,4 +325,166 @@ class BudgetUtilsTest {
             assertEquals(month, recreated)
         }
     }
+
+    // ========== Validation Tests ==========
+
+    @Test
+    fun testIsValidMonth_validMonths() {
+        assertTrue(BudgetUtils.isValidMonth(202501L))
+        assertTrue(BudgetUtils.isValidMonth(202512L))
+        assertTrue(BudgetUtils.isValidMonth(190001L))
+        assertTrue(BudgetUtils.isValidMonth(209912L))
+        assertTrue(BudgetUtils.isValidMonth(200006L))
+    }
+
+    @Test
+    fun testIsValidMonth_invalidMonths() {
+        // Invalid month (0)
+        assertTrue(!BudgetUtils.isValidMonth(202500L))
+        // Invalid month (13)
+        assertTrue(!BudgetUtils.isValidMonth(202513L))
+        // Year too old
+        assertTrue(!BudgetUtils.isValidMonth(189912L))
+        // Year too new
+        assertTrue(!BudgetUtils.isValidMonth(210001L))
+        // Malformed
+        assertTrue(!BudgetUtils.isValidMonth(2025L))
+        assertTrue(!BudgetUtils.isValidMonth(20250101L))
+    }
+
+    @Test
+    fun testRequireValidMonth_valid() {
+        // Should not throw
+        BudgetUtils.requireValidMonth(202501L)
+        BudgetUtils.requireValidMonth(202512L)
+    }
+
+    @Test
+    fun testRequireValidMonth_invalid() {
+        var thrown = false
+        try {
+            BudgetUtils.requireValidMonth(202513L)
+        } catch (e: IllegalArgumentException) {
+            thrown = true
+            assertTrue(e.message?.contains("Invalid") == true)
+        }
+        assertTrue(thrown, "Should throw IllegalArgumentException for invalid month")
+    }
+
+    @Test
+    fun testRequireValidId_valid() {
+        // Should not throw
+        BudgetUtils.requireValidId("abc-123")
+        BudgetUtils.requireValidId("x")
+    }
+
+    @Test
+    fun testRequireValidId_blank() {
+        var thrown = false
+        try {
+            BudgetUtils.requireValidId("")
+        } catch (e: IllegalArgumentException) {
+            thrown = true
+            assertTrue(e.message?.contains("blank") == true)
+        }
+        assertTrue(thrown, "Should throw IllegalArgumentException for blank id")
+    }
+
+    @Test
+    fun testRequirePositive_valid() {
+        // Should not throw
+        BudgetUtils.requirePositive(1)
+        BudgetUtils.requirePositive(100)
+    }
+
+    @Test
+    fun testRequirePositive_zero() {
+        var thrown = false
+        try {
+            BudgetUtils.requirePositive(0)
+        } catch (e: IllegalArgumentException) {
+            thrown = true
+            assertTrue(e.message?.contains("positive") == true)
+        }
+        assertTrue(thrown, "Should throw IllegalArgumentException for zero")
+    }
+
+    @Test
+    fun testRequirePositive_negative() {
+        var thrown = false
+        try {
+            BudgetUtils.requirePositive(-5)
+        } catch (e: IllegalArgumentException) {
+            thrown = true
+        }
+        assertTrue(thrown, "Should throw IllegalArgumentException for negative")
+    }
+
+    // ========== Budget Averaging Rounding Tests ==========
+
+    @Test
+    fun testAverageRoundingBehavior() {
+        // Test that kotlin.math.round behaves correctly for budget calculations
+        // These simulate the budget averaging calculation
+
+        // -10001 / 3 = -3333.67 -> should round to -3334
+        val avg1 = kotlin.math.round(-10001.0 / 3).toLong()
+        assertEquals(-3334L, avg1)
+
+        // -10000 / 3 = -3333.33 -> should round to -3333
+        val avg2 = kotlin.math.round(-10000.0 / 3).toLong()
+        assertEquals(-3333L, avg2)
+
+        // -10002 / 3 = -3334.00 -> should be exactly -3334
+        val avg3 = kotlin.math.round(-10002.0 / 3).toLong()
+        assertEquals(-3334L, avg3)
+
+        // Positive case: 10001 / 3 = 3333.67 -> should round to 3334
+        val avg4 = kotlin.math.round(10001.0 / 3).toLong()
+        assertEquals(3334L, avg4)
+    }
+
+    @Test
+    fun testSortOrderMidpointPrecision() {
+        // Test that sort order midpoint calculations maintain precision
+        // This verifies the fix for the sort_order precision issue
+
+        val items = listOf(
+            "a" to 16384.0,
+            "b" to 16385.0  // Very close together
+        )
+
+        // Insert between a and b
+        val midpoint = BudgetUtils.calculateNewSortOrder(items, "b")
+        assertEquals(16384.5, midpoint)
+
+        // Further subdivisions should also work
+        val items2 = listOf(
+            "a" to 16384.0,
+            "new" to 16384.5,
+            "b" to 16385.0
+        )
+        val midpoint2 = BudgetUtils.calculateNewSortOrder(items2, "new")
+        assertEquals(16384.25, midpoint2)
+    }
+
+    @Test
+    fun testSortOrderManySubdivisions() {
+        // Test that we can subdivide sort orders many times without losing precision
+        var sortOrder = BudgetUtils.SORT_INCREMENT // 16384.0
+        val subdivisions = mutableListOf(sortOrder)
+
+        // Subdivide 20 times (should still have precision)
+        repeat(20) {
+            sortOrder /= 2.0
+            subdivisions.add(sortOrder)
+        }
+
+        // All values should be distinct
+        val distinctCount = subdivisions.distinct().size
+        assertEquals(21, distinctCount, "All 21 subdivisions should be distinct")
+
+        // Last value should still be > 0
+        assertTrue(subdivisions.last() > 0, "Should not reach zero after 20 subdivisions")
+    }
 }

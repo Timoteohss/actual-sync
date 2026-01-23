@@ -402,8 +402,12 @@ class SyncManager(
      * @param categoryId The category ID to set budget for
      * @param month The month in YYYYMM format (e.g., 202501 for January 2025)
      * @param amount The budget amount in cents (e.g., 50000 for $500.00)
+     * @throws IllegalArgumentException if month format is invalid or categoryId is blank
      */
     fun setBudgetAmount(categoryId: String, month: Long, amount: Long) {
+        BudgetUtils.requireValidId(categoryId, "categoryId")
+        BudgetUtils.requireValidMonth(month)
+
         val budgetId = "$month-$categoryId"
         engine.createChange("zero_budgets", budgetId, "month", month)
         engine.createChange("zero_budgets", budgetId, "category", categoryId)
@@ -489,6 +493,10 @@ class SyncManager(
      * @param amount Amount to transfer in cents
      */
     fun transferBudget(fromCategoryId: String, toCategoryId: String, month: Long, amount: Long) {
+        BudgetUtils.requireValidId(fromCategoryId, "fromCategoryId")
+        BudgetUtils.requireValidId(toCategoryId, "toCategoryId")
+        BudgetUtils.requireValidMonth(month)
+
         // Get current budgets
         val fromBudgetId = "$month-$fromCategoryId"
         val toBudgetId = "$month-$toCategoryId"
@@ -524,8 +532,8 @@ class SyncManager(
         // Calculate new sort order
         val newSortOrder = BudgetUtils.calculateNewSortOrder(categoriesInGroup, targetCategoryId)
 
-        // Update the category
-        engine.createChange("categories", categoryId, "sort_order", newSortOrder.toLong())
+        // Update the category (keep as Double to preserve precision)
+        engine.createChange("categories", categoryId, "sort_order", newSortOrder)
         engine.createChange("categories", categoryId, "cat_group", newGroupId)
     }
 
@@ -546,8 +554,8 @@ class SyncManager(
         // Calculate new sort order
         val newSortOrder = BudgetUtils.calculateNewSortOrder(groups, targetGroupId)
 
-        // Update the group
-        engine.createChange("category_groups", groupId, "sort_order", newSortOrder.toLong())
+        // Update the group (keep as Double to preserve precision)
+        engine.createChange("category_groups", groupId, "sort_order", newSortOrder)
     }
 
     /**
@@ -573,8 +581,8 @@ class SyncManager(
         // Calculate new sort order
         val newSortOrder = BudgetUtils.calculateNewSortOrder(accounts, targetAccountId)
 
-        // Update the account
-        engine.createChange("accounts", accountId, "sort_order", newSortOrder.toLong())
+        // Update the account (keep as Double to preserve precision)
+        engine.createChange("accounts", accountId, "sort_order", newSortOrder)
     }
 
     /**
@@ -593,8 +601,12 @@ class SyncManager(
      *
      * @param categoryId The category to copy budget for
      * @param month The target month in YYYYMM format
+     * @throws IllegalArgumentException if parameters are invalid
      */
     fun copySinglePreviousMonth(categoryId: String, month: Long) {
+        BudgetUtils.requireValidId(categoryId, "categoryId")
+        BudgetUtils.requireValidMonth(month)
+
         val prevMonth = BudgetUtils.calculatePreviousMonth(month)
         val prevBudgetId = "$prevMonth-$categoryId"
         val prevBudget = database.actualDatabaseQueries.getBudgetById(prevBudgetId).executeAsOneOrNull()
@@ -607,9 +619,14 @@ class SyncManager(
      *
      * @param categoryId The category to set budget for
      * @param month The target month in YYYYMM format
-     * @param n Number of months to average
+     * @param n Number of months to average (must be positive)
+     * @throws IllegalArgumentException if parameters are invalid
      */
     fun setNMonthAverage(categoryId: String, month: Long, n: Int) {
+        BudgetUtils.requireValidId(categoryId, "categoryId")
+        BudgetUtils.requireValidMonth(month)
+        BudgetUtils.requirePositive(n, "n (months to average)")
+
         val (startDate, endDate) = BudgetUtils.calculateDateRangeForPreviousMonths(month, n)
         val spentData = database.actualDatabaseQueries
             .getSpentByCategoryForMonths(startDate, endDate)
@@ -621,9 +638,9 @@ class SyncManager(
         // Get category to check if it's income
         val category = database.actualDatabaseQueries.getCategoryById(categoryId).executeAsOneOrNull()
 
-        // Calculate average (spent is negative for expenses)
-        val nLong: Long = n.toLong()
-        var avg: Long = totalSpent / nLong
+        // Calculate average with proper rounding (not truncation)
+        // Using round() ensures we don't systematically lose cents
+        var avg: Long = kotlin.math.round(totalSpent.toDouble() / n).toLong()
 
         // For expense categories, negate to make budget positive
         if (category?.is_income == 0L) {

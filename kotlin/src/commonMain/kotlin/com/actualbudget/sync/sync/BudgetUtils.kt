@@ -177,4 +177,58 @@ object BudgetUtils {
         val (toYear, toM) = parseMonth(toMonth)
         return (toYear - fromYear) * 12 + (toM - fromM)
     }
+
+    // ========== Validation Helpers ==========
+
+    /**
+     * Validate that a month is in valid YYYYMM format.
+     * Valid range: 190001 to 209912 (years 1900-2099)
+     *
+     * @param month The month to validate
+     * @return true if valid, false otherwise
+     */
+    fun isValidMonth(month: Long): Boolean {
+        val year = (month / 100).toInt()
+        val m = (month % 100).toInt()
+        return year in 1900..2099 && m in 1..12
+    }
+
+    /**
+     * Validate month format and throw if invalid.
+     *
+     * @param month The month to validate
+     * @param paramName Parameter name for error message
+     * @throws IllegalArgumentException if month is invalid
+     */
+    fun requireValidMonth(month: Long, paramName: String = "month") {
+        require(isValidMonth(month)) {
+            "Invalid $paramName format: $month. Expected YYYYMM format (e.g., 202501)"
+        }
+    }
+
+    /**
+     * Validate that a string ID is not blank.
+     *
+     * @param id The ID to validate
+     * @param paramName Parameter name for error message
+     * @throws IllegalArgumentException if ID is blank
+     */
+    fun requireValidId(id: String, paramName: String = "id") {
+        require(id.isNotBlank()) {
+            "$paramName cannot be blank"
+        }
+    }
+
+    /**
+     * Validate that a count is positive.
+     *
+     * @param n The count to validate
+     * @param paramName Parameter name for error message
+     * @throws IllegalArgumentException if count is not positive
+     */
+    fun requirePositive(n: Int, paramName: String = "count") {
+        require(n > 0) {
+            "$paramName must be positive, got: $n"
+        }
+    }
 }
