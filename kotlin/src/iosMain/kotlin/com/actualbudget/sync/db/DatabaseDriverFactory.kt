@@ -53,7 +53,7 @@ fun createDriverForExistingDb(dbName: String): SqlDriver {
     return NativeSqliteDriver(
         configuration = DatabaseConfiguration(
             name = dbName,
-            version = 2,  // Bump version for migration
+            version = DatabaseConstants.SCHEMA_VERSION,
             // Use DELETE journal mode like Actual Budget does
             journalMode = JournalMode.DELETE,
             create = { connection ->
@@ -118,7 +118,7 @@ fun createDriverForExistingDbAtPath(basePath: String, dbName: String): SqlDriver
     return NativeSqliteDriver(
         configuration = DatabaseConfiguration(
             name = dbName,
-            version = 2,
+            version = DatabaseConstants.SCHEMA_VERSION,
             journalMode = JournalMode.DELETE,
             create = { connection ->
                 println("[DatabaseDriverFactory] Creating sync_metadata table if needed")

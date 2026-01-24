@@ -5,6 +5,8 @@ import com.actualbudget.sync.crdt.MutableClock
 import com.actualbudget.sync.crdt.Timestamp
 import com.actualbudget.sync.db.ActualDatabase
 import com.actualbudget.sync.io.BudgetFileManager
+import com.actualbudget.sync.io.BudgetMetadata
+import kotlinx.serialization.json.Json
 import com.actualbudget.sync.proto.SyncRequest
 import com.actualbudget.sync.proto.SyncResponse
 import io.ktor.client.*
@@ -354,10 +356,13 @@ class SyncManager(
      * Extract budget ID from metadata JSON string.
      */
     private fun extractBudgetIdFromMetadata(json: String): String? {
-        // Simple extraction without full JSON parsing
-        // Looking for "id": "value"
-        val idPattern = """"id"\s*:\s*"([^"]+)"""".toRegex()
-        return idPattern.find(json)?.groupValues?.get(1)
+        return try {
+            val metadata = Json { ignoreUnknownKeys = true }.decodeFromString<BudgetMetadata>(json)
+            metadata.id
+        } catch (e: Exception) {
+            println("[SyncManager] Failed to parse metadata JSON: ${e.message}")
+            null
+        }
     }
 
     /**

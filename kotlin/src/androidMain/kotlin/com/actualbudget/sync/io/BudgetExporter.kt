@@ -41,43 +41,20 @@ actual fun clearCacheTables(dbPath: String) {
         println("[BudgetExporter] Failed to drop sync_metadata: ${e.message}")
     }
 
-    // DROP sync tables - webapp will create fresh ones when it loads
+    // Clear sync tables but keep them (webapp expects them to exist)
+    // The webapp will create fresh clock data when it loads with resetClock=true
     try {
-        db.execSQL("DROP TABLE IF EXISTS messages_crdt")
-        println("[BudgetExporter] Dropped messages_crdt table")
+        db.execSQL("DELETE FROM messages_crdt")
+        println("[BudgetExporter] Cleared messages_crdt table")
     } catch (e: Exception) {
-        println("[BudgetExporter] Failed to drop messages_crdt: ${e.message}")
+        println("[BudgetExporter] messages_crdt table not found: ${e.message}")
     }
 
     try {
-        db.execSQL("DROP TABLE IF EXISTS messages_clock")
-        println("[BudgetExporter] Dropped messages_clock table")
+        db.execSQL("DELETE FROM messages_clock")
+        println("[BudgetExporter] Cleared messages_clock table")
     } catch (e: Exception) {
-        println("[BudgetExporter] Failed to drop messages_clock: ${e.message}")
-    }
-
-    // Remove tombstone column from zero_budgets (webapp doesn't have it)
-    try {
-        db.execSQL("""
-            CREATE TABLE zero_budgets_new (
-                id TEXT PRIMARY KEY,
-                month INTEGER,
-                category TEXT,
-                amount INTEGER DEFAULT 0,
-                carryover INTEGER DEFAULT 0,
-                goal INTEGER DEFAULT null,
-                long_goal INTEGER DEFAULT null
-            )
-        """.trimIndent())
-        db.execSQL("""
-            INSERT INTO zero_budgets_new (id, month, category, amount, carryover, goal, long_goal)
-            SELECT id, month, category, amount, carryover, goal, long_goal FROM zero_budgets
-        """.trimIndent())
-        db.execSQL("DROP TABLE zero_budgets")
-        db.execSQL("ALTER TABLE zero_budgets_new RENAME TO zero_budgets")
-        println("[BudgetExporter] Recreated zero_budgets without tombstone column")
-    } catch (e: Exception) {
-        println("[BudgetExporter] Failed to recreate zero_budgets: ${e.message}")
+        println("[BudgetExporter] messages_clock table not found: ${e.message}")
     }
 
     // VACUUM to clean up and ensure consistent file format

@@ -3,6 +3,7 @@ package com.actualbudget.sync.io
 import co.touchlab.sqliter.DatabaseConfiguration
 import co.touchlab.sqliter.JournalMode
 import co.touchlab.sqliter.createDatabaseManager
+import com.actualbudget.sync.db.DatabaseConstants
 import kotlinx.cinterop.ExperimentalForeignApi
 import platform.Foundation.NSFileManager
 
@@ -37,11 +38,11 @@ actual fun clearCacheTables(dbPath: String) {
         }
 
         // Open database with DELETE journal mode explicitly
-        // Use version 2 to match DatabaseDriverFactory (which sets version=2 when opening)
+        // Use same version as DatabaseDriverFactory to avoid version mismatch errors
         val dbManager = createDatabaseManager(
             DatabaseConfiguration(
                 name = dbName,
-                version = 2,
+                version = DatabaseConstants.SCHEMA_VERSION,
                 journalMode = JournalMode.DELETE,
                 create = { },
                 upgrade = { _, _, _ -> },
@@ -100,30 +101,6 @@ actual fun clearCacheTables(dbPath: String) {
                 println("[BudgetExporter] messages_clock table not found: ${e.message}")
             }
 
-            // Remove tombstone column from zero_budgets (webapp doesn't have it)
-            try {
-                connection.rawExecSql("""
-                    CREATE TABLE zero_budgets_new (
-                        id TEXT PRIMARY KEY,
-                        month INTEGER,
-                        category TEXT,
-                        amount INTEGER DEFAULT 0,
-                        carryover INTEGER DEFAULT 0,
-                        goal INTEGER DEFAULT null,
-                        long_goal INTEGER DEFAULT null
-                    )
-                """.trimIndent())
-                connection.rawExecSql("""
-                    INSERT INTO zero_budgets_new (id, month, category, amount, carryover, goal, long_goal)
-                    SELECT id, month, category, amount, carryover, goal, long_goal FROM zero_budgets
-                """.trimIndent())
-                connection.rawExecSql("DROP TABLE zero_budgets")
-                connection.rawExecSql("ALTER TABLE zero_budgets_new RENAME TO zero_budgets")
-                println("[BudgetExporter] Recreated zero_budgets without tombstone column")
-            } catch (e: Exception) {
-                println("[BudgetExporter] Failed to recreate zero_budgets: ${e.message}")
-            }
-
             // VACUUM to clean up and ensure consistent file format
             try {
                 connection.rawExecSql("VACUUM")
@@ -138,6 +115,6 @@ actual fun clearCacheTables(dbPath: String) {
         }
     } catch (e: Exception) {
         println("[BudgetExporter] Failed to process tables: ${e.message}")
-        e.printStackTrace()
+        throw IllegalStateException("Failed to process database for webapp compatibility: ${e.message}", e)
     }
 }
