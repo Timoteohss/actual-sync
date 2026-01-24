@@ -2,6 +2,7 @@ package com.actualbudget.sync.crdt
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlin.concurrent.Volatile
 
 /**
  * Clock state containing the current timestamp and merkle trie.
@@ -14,8 +15,14 @@ data class ClockState(
 
 /**
  * Global clock management for CRDT operations.
+ *
+ * Thread-safe singleton using @Volatile for visibility.
+ * Note: In typical usage patterns (single sync operation at a time),
+ * this provides sufficient thread safety. For concurrent access,
+ * external synchronization should be used.
  */
 object ClockManager {
+    @Volatile
     private var clock: SyncClock? = null
 
     private val json = Json {
@@ -25,11 +32,13 @@ object ClockManager {
 
     /**
      * Get the current clock instance.
+     * Thread-safe read using volatile.
      */
     fun getClock(): SyncClock? = clock
 
     /**
      * Set the global clock instance.
+     * Thread-safe write using volatile.
      */
     fun setClock(newClock: SyncClock) {
         clock = newClock
@@ -41,7 +50,7 @@ object ClockManager {
     fun makeClock(timestamp: Timestamp, merkle: TrieNode = Merkle.emptyTrie()): SyncClock {
         return SyncClock(
             timestamp = MutableClock.from(timestamp),
-            merkle = merkle
+            initialMerkle = merkle
         )
     }
 
@@ -58,6 +67,9 @@ object ClockManager {
 
     /**
      * Deserialize clock state from a JSON string.
+     *
+     * If deserialization fails, logs a warning and returns a fresh clock.
+     * This prevents sync state loss from going unnoticed.
      */
     fun deserialize(data: String): SyncClock {
         return try {
@@ -66,14 +78,16 @@ object ClockManager {
                 ?: throw Timestamp.InvalidError(state.timestamp)
             SyncClock(
                 timestamp = MutableClock.from(ts),
-                merkle = state.merkle
+                initialMerkle = state.merkle
             )
         } catch (e: Exception) {
+            // Log warning - silent failures can cause sync issues
+            println("[ClockManager] Warning: Failed to deserialize clock state: ${e.message}. Creating fresh clock.")
             // Return a fresh clock with new client ID
             val nodeId = Timestamp.makeClientId()
             SyncClock(
                 timestamp = MutableClock(0, 0, nodeId),
-                merkle = Merkle.emptyTrie()
+                initialMerkle = Merkle.emptyTrie()
             )
         }
     }
@@ -81,18 +95,30 @@ object ClockManager {
 
 /**
  * Sync clock containing mutable timestamp and merkle trie state.
+ *
+ * Thread-safety note: Uses @Volatile for visibility. For concurrent access
+ * from multiple threads, external synchronization should be used.
+ * In typical usage (single sync operation at a time), this is sufficient.
  */
-data class SyncClock(
+class SyncClock(
     val timestamp: MutableClock,
-    var merkle: TrieNode
+    initialMerkle: TrieNode
 ) {
+    @Volatile
+    private var _merkle: TrieNode = initialMerkle
+
+    /**
+     * Get the current merkle trie.
+     */
+    val merkle: TrieNode get() = _merkle
+
     /**
      * Generate a new timestamp for a local change.
      */
     fun send(): Timestamp {
         val ts = timestamp.send()
-        merkle = Merkle.insert(merkle, ts)
-        merkle = Merkle.prune(merkle)
+        _merkle = Merkle.insert(_merkle, ts)
+        _merkle = Merkle.prune(_merkle)
         return ts
     }
 
@@ -101,8 +127,8 @@ data class SyncClock(
      */
     fun recv(msg: Timestamp): Timestamp {
         val ts = timestamp.recv(msg)
-        merkle = Merkle.insert(merkle, msg)
-        merkle = Merkle.prune(merkle)
+        _merkle = Merkle.insert(_merkle, msg)
+        _merkle = Merkle.prune(_merkle)
         return ts
     }
 
@@ -110,4 +136,11 @@ data class SyncClock(
      * Get the current timestamp without advancing the clock.
      */
     fun current(): Timestamp = timestamp.toTimestamp()
+
+    /**
+     * Update the merkle trie directly (for deserialization/sync).
+     */
+    fun setMerkle(newMerkle: TrieNode) {
+        _merkle = newMerkle
+    }
 }

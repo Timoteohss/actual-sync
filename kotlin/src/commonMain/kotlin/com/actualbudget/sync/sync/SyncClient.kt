@@ -12,7 +12,28 @@ import kotlinx.serialization.json.Json
 
 /**
  * Client for syncing with Actual Budget server.
+ *
+ * @deprecated Use [ActualAuthClient] for authentication and [ActualFileClient] for file operations.
+ * This class will be removed in a future release.
+ *
+ * Migration:
+ * ```
+ * // Before:
+ * val client = SyncClient(serverUrl, httpClient)
+ * client.login(password)
+ * val files = client.listFiles()
+ *
+ * // After:
+ * val authClient = ActualAuthClient(httpClient)
+ * val session = authClient.login(serverUrl, password)
+ * val fileClient = ActualFileClient()
+ * val files = fileClient.listFiles(session)
+ * ```
  */
+@Deprecated(
+    message = "Use ActualAuthClient for auth and ActualFileClient for file operations",
+    replaceWith = ReplaceWith("ActualAuthClient", "com.actualbudget.sync.auth.ActualAuthClient")
+)
 class SyncClient(
     private val serverUrl: String,
     private val httpClient: HttpClient = HttpClient()
@@ -124,21 +145,19 @@ class SyncClient(
     /**
      * Sync messages with the server.
      *
-     * @param messages Local messages to send
-     * @param since Timestamp to sync from
-     * @return New messages from server and updated merkle trie
-     * @throws NotImplementedError sync not yet implemented
+     * @deprecated This method was never implemented. Use [SyncManager] for sync operations.
+     * @throws NotImplementedError Always throws - use SyncManager.sync() instead
      */
+    @Deprecated(
+        message = "Use SyncManager for sync operations",
+        replaceWith = ReplaceWith("SyncManager(session, database).sync()")
+    )
     @Throws(Exception::class)
     suspend fun sync(
         messages: List<MessageEnvelope>,
         since: String
     ): SyncResponse {
-        // TODO: Implement protobuf serialization
-        // 1. Build SyncRequest protobuf
-        // 2. POST to /sync/sync with content-type application/actual-sync
-        // 3. Parse SyncResponse protobuf
-        throw NotImplementedError("Sync not yet implemented")
+        throw NotImplementedError("Use SyncManager for sync operations")
     }
 
     /**

@@ -34,8 +34,22 @@ data class Timestamp(
      */
     fun hash(): Int = MurmurHash3.hash32(toString())
 
+    /**
+     * Compare timestamps using numeric fields for performance.
+     * Avoids string allocation on every comparison.
+     * Order: millis → counter → node (lexicographic)
+     */
     override fun compareTo(other: Timestamp): Int {
-        return toString().compareTo(other.toString())
+        // Compare millis first (most significant)
+        val millisCmp = millis.compareTo(other.millis)
+        if (millisCmp != 0) return millisCmp
+
+        // Then counter
+        val counterCmp = counter.compareTo(other.counter)
+        if (counterCmp != 0) return counterCmp
+
+        // Finally node (string comparison for tie-breaker)
+        return node.compareTo(other.node)
     }
 
     companion object {

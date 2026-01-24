@@ -135,6 +135,12 @@ CREATE TABLE messages_crdt (
 
 CREATE INDEX messages_crdt_search ON messages_crdt(dataset, row, column, timestamp);
 
+-- Performance indexes for common query patterns
+CREATE INDEX IF NOT EXISTS idx_transactions_acct ON transactions(acct);
+CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
+CREATE INDEX IF NOT EXISTS idx_transactions_parent_id ON transactions(parent_id);
+CREATE INDEX IF NOT EXISTS idx_zero_budgets_month ON zero_budgets(month);
+
 -- Sync metadata
 CREATE TABLE sync_metadata (
     key TEXT PRIMARY KEY NOT NULL,

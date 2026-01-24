@@ -1,9 +1,12 @@
 package com.actualbudget.sync.sync
 
+import com.actualbudget.sync.auth.AuthSession
 import com.actualbudget.sync.crdt.Merkle
 import com.actualbudget.sync.crdt.MutableClock
 import com.actualbudget.sync.crdt.Timestamp
 import com.actualbudget.sync.db.ActualDatabase
+import com.actualbudget.sync.http.RetryConfig
+import com.actualbudget.sync.http.withRetry
 import com.actualbudget.sync.io.BudgetFileManager
 import com.actualbudget.sync.io.BudgetMetadata
 import kotlinx.serialization.json.Json
@@ -13,6 +16,7 @@ import io.ktor.client.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
+import kotlin.concurrent.Volatile
 
 /**
  * Details about a single pending change.
@@ -27,23 +31,134 @@ data class PendingChangeDetail(
 
 /**
  * High-level sync manager that coordinates sync operations.
+ *
+ * Can operate in two modes:
+ * 1. Connected mode: Pass an [AuthSession] to enable server sync
+ * 2. Local-only mode: Pass null session for offline-only operation
+ *
+ * Thread-safety note: Uses @Volatile for visibility. In typical usage
+ * (single sync operation at a time), this is sufficient. For concurrent
+ * access from multiple threads, external synchronization should be used.
+ *
+ * IMPORTANT: Call initialize() before using any sync operations.
+ *
+ * Usage:
+ * ```
+ * // Connected mode
+ * val session = authClient.login(serverUrl, password)
+ * val manager = SyncManager(session, database)
+ * manager.initialize()
+ *
+ * // Local-only mode
+ * val manager = SyncManager(database)
+ * manager.initialize()
+ * ```
  */
 class SyncManager(
-    private val serverUrl: String,
-    private val httpClient: HttpClient,
+    session: AuthSession?,
     private val database: ActualDatabase
 ) {
-    private var token: String? = null
-    private var fileId: String? = null
-    private var groupId: String? = null
+    // Mutable state with @Volatile for visibility across threads
+    @Volatile
+    private var _session: AuthSession? = session
 
+    @Volatile
+    private var _fileId: String? = null
+
+    @Volatile
+    private var _groupId: String? = null
+
+    @Volatile
+    private var _initialized: Boolean = false
+
+    // These are only accessed after initialization
     private lateinit var clock: MutableClock
     private lateinit var engine: SyncEngine
 
+    // Accessors for mutable state
+    private var session: AuthSession?
+        get() = _session
+        set(value) { _session = value }
+
+    private var fileId: String?
+        get() = _fileId
+        set(value) { _fileId = value }
+
+    private var groupId: String?
+        get() = _groupId
+        set(value) { _groupId = value }
+
+    /**
+     * Check if the manager has been initialized.
+     * Must be true before calling any sync operations.
+     */
+    val isInitialized: Boolean get() = _initialized
+
+    /**
+     * Require that the manager is initialized, throwing if not.
+     */
+    private fun requireInitialized() {
+        if (!_initialized) {
+            throw IllegalStateException("SyncManager not initialized. Call initialize() first.")
+        }
+    }
+
+    /**
+     * Create a SyncManager in local-only mode (no server connection).
+     *
+     * @param database The local database
+     */
+    constructor(database: ActualDatabase) : this(null, database)
+
+    /**
+     * Legacy constructor for backward compatibility.
+     *
+     * @param serverUrl The server URL
+     * @param httpClient The HTTP client
+     * @param database The local database
+     * @deprecated Use constructor with AuthSession instead
+     */
+    @Deprecated(
+        message = "Use constructor with AuthSession instead",
+        replaceWith = ReplaceWith("SyncManager(session, database)")
+    )
+    constructor(
+        serverUrl: String,
+        httpClient: HttpClient,
+        database: ActualDatabase
+    ) : this(
+        if (serverUrl.isNotBlank()) AuthSession(serverUrl, "", httpClient) else null,
+        database
+    )
+
+    // Helper properties for accessing session data
+    private val serverUrl: String get() = session?.serverUrl ?: ""
+    private val httpClient: HttpClient? get() = session?.httpClient
+    private val token: String? get() = session?.token?.takeIf { it.isNotBlank() }
+
+    /**
+     * Check if this manager is connected to a server.
+     */
+    val isConnected: Boolean get() = session != null && token != null
+
+    /**
+     * Update the session (e.g., after re-authentication).
+     * Thread-safe.
+     */
+    fun updateSession(newSession: AuthSession) {
+        session = newSession
+    }
+
     /**
      * Initialize the sync manager with a client ID.
+     * Must be called before any sync operations.
+     *
+     * Note: Can be called multiple times safely (subsequent calls are no-ops).
+     * For thread-safe initialization from multiple threads, use external synchronization.
      */
     fun initialize(clientId: String? = null) {
+        if (_initialized) return
+
         val nodeId = clientId ?: Timestamp.makeClientId()
 
         // Try to load clock state from database
@@ -57,6 +172,8 @@ class SyncManager(
         clock = MutableClock(millis = savedMillis, counter = savedCounter, node = savedNode)
         engine = SyncEngine(database, clock)
         engine.initialize()
+
+        _initialized = true
     }
 
     /**
@@ -70,9 +187,23 @@ class SyncManager(
 
     /**
      * Set authentication token.
+     *
+     * @deprecated Use constructor with AuthSession instead, or call updateSession()
      */
+    @Deprecated(
+        message = "Use constructor with AuthSession or updateSession() instead",
+        replaceWith = ReplaceWith("updateSession(AuthSession(serverUrl, token, httpClient))")
+    )
     fun setToken(token: String) {
-        this.token = token
+        // Update session with new token while preserving serverUrl and httpClient
+        val currentSession = this.session
+        if (currentSession != null) {
+            this.session = AuthSession(
+                serverUrl = currentSession.serverUrl,
+                token = token,
+                httpClient = currentSession.httpClient
+            )
+        }
     }
 
     /**
@@ -86,8 +217,11 @@ class SyncManager(
     /**
      * Perform a full sync from scratch.
      * Downloads all messages from the server.
+     *
+     * @throws IllegalStateException if not initialized
      */
     suspend fun fullSync(): SyncResult {
+        requireInitialized()
         requireNotNull(fileId) { "Budget not set. Call setBudget() first." }
         requireNotNull(groupId) { "Budget not set. Call setBudget() first." }
 
@@ -100,28 +234,44 @@ class SyncManager(
      * This downloads the full SQLite database, not just sync messages.
      * Use this when first opening a budget or after a sync reset.
      *
+     * Includes automatic retry for transient network failures.
+     * Requires a connected session with valid token.
+     *
      * @param fileId The budget file ID to download
-     * @return The raw zip file bytes, or null if download failed
+     * @param retryConfig Retry configuration (default: up to 3 retries)
+     * @return The raw zip file bytes, or null if download failed or not connected
      */
-    suspend fun downloadBudgetFile(fileId: String): ByteArray? {
+    suspend fun downloadBudgetFile(
+        fileId: String,
+        retryConfig: RetryConfig = RetryConfig.DEFAULT
+    ): ByteArray? {
+        val client = httpClient ?: run {
+            println("[SyncManager] Cannot download: no HTTP client (local-only mode)")
+            return null
+        }
+
         return try {
             println("[SyncManager] Downloading budget file: $fileId")
 
-            val response = httpClient.get("$serverUrl/sync/download-user-file") {
-                token?.let { header("X-ACTUAL-TOKEN", it) }
-                header("X-ACTUAL-FILE-ID", fileId)
-            }
+            withRetry(
+                config = retryConfig,
+                operation = "download budget file $fileId"
+            ) {
+                val response = client.get("$serverUrl/sync/download-user-file") {
+                    token?.let { header("X-ACTUAL-TOKEN", it) }
+                    header("X-ACTUAL-FILE-ID", fileId)
+                }
 
-            if (response.status.isSuccess()) {
-                val bytes = response.readRawBytes()
-                println("[SyncManager] Downloaded ${bytes.size} bytes")
-                bytes
-            } else {
-                println("[SyncManager] Download failed: ${response.status}")
-                null
+                if (response.status.isSuccess()) {
+                    val bytes = response.readRawBytes()
+                    println("[SyncManager] Downloaded ${bytes.size} bytes")
+                    bytes
+                } else {
+                    throw Exception("Download failed: ${response.status}")
+                }
             }
         } catch (e: Exception) {
-            println("[SyncManager] Download error: ${e.message}")
+            println("[SyncManager] Download error after retries: ${e.message}")
             null
         }
     }
@@ -368,8 +518,11 @@ class SyncManager(
     /**
      * Perform an incremental sync.
      * Only syncs changes since last sync point.
+     *
+     * @throws IllegalStateException if not initialized
      */
     suspend fun sync(): SyncResult {
+        requireInitialized()
         requireNotNull(fileId) { "Budget not set. Call setBudget() first." }
         requireNotNull(groupId) { "Budget not set. Call setBudget() first." }
 
@@ -387,35 +540,52 @@ class SyncManager(
 
     /**
      * Perform the actual sync HTTP request.
+     *
+     * Includes automatic retry for transient network failures.
+     * CRDT sync is idempotent so retrying is safe.
+     * Requires a connected session with valid token.
+     *
+     * @param request The sync request to send
+     * @param retryConfig Retry configuration (default: up to 3 retries)
      */
-    private suspend fun performSync(request: SyncRequest): SyncResult {
+    private suspend fun performSync(
+        request: SyncRequest,
+        retryConfig: RetryConfig = RetryConfig.DEFAULT
+    ): SyncResult {
+        val client = httpClient ?: return SyncResult.Error("Not connected: no HTTP client (local-only mode)")
+
         return try {
             val requestBytes = request.encode()
 
-            val response = httpClient.post("$serverUrl/sync/sync") {
-                token?.let { header("X-ACTUAL-TOKEN", it) }
-                header("X-ACTUAL-FILE-ID", fileId)
-                contentType(ContentType("application", "actual-sync"))
-                setBody(requestBytes)
-            }
+            withRetry(
+                config = retryConfig,
+                operation = "sync with server"
+            ) {
+                val response = client.post("$serverUrl/sync/sync") {
+                    token?.let { header("X-ACTUAL-TOKEN", it) }
+                    header("X-ACTUAL-FILE-ID", fileId)
+                    contentType(ContentType("application", "actual-sync"))
+                    setBody(requestBytes)
+                }
 
-            if (response.status.isSuccess()) {
-                val responseBytes = response.readRawBytes()
-                val syncResponse = SyncResponse.decode(responseBytes)
+                if (response.status.isSuccess()) {
+                    val responseBytes = response.readRawBytes()
+                    val syncResponse = SyncResponse.decode(responseBytes)
 
-                val applied = engine.processSyncResponse(syncResponse)
-                saveClockState()
+                    val applied = engine.processSyncResponse(syncResponse)
+                    saveClockState()
 
-                SyncResult.Success(
-                    messagesSent = request.messages.size,
-                    messagesReceived = syncResponse.messages.size,
-                    messagesApplied = applied
-                )
-            } else {
-                SyncResult.Error("Sync failed: ${response.status}")
+                    SyncResult.Success(
+                        messagesSent = request.messages.size,
+                        messagesReceived = syncResponse.messages.size,
+                        messagesApplied = applied
+                    )
+                } else {
+                    throw Exception("Sync failed: ${response.status}")
+                }
             }
         } catch (e: Exception) {
-            SyncResult.Error("Sync error: ${e.message}")
+            SyncResult.Error("Sync error after retries: ${e.message}")
         }
     }
 
@@ -423,8 +593,11 @@ class SyncManager(
 
     /**
      * Create a new account locally.
+     *
+     * @throws IllegalStateException if not initialized
      */
     fun createAccount(id: String, name: String, offbudget: Boolean = false): String {
+        requireInitialized()
         engine.createChange("accounts", id, "name", name)
         engine.createChange("accounts", id, "offbudget", if (offbudget) 1 else 0)
         engine.createChange("accounts", id, "closed", 0)
@@ -1000,6 +1173,8 @@ class SyncManager(
      * @param payeeId Optional payee ID
      * @param categoryId Optional category ID
      * @param notes Optional notes
+     *
+     * @throws IllegalStateException if not initialized
      */
     fun createTransaction(
         id: String,
@@ -1010,6 +1185,7 @@ class SyncManager(
         categoryId: String? = null,
         notes: String? = null
     ): String {
+        requireInitialized()
         engine.createChange("transactions", id, "acct", accountId)
         engine.createChange("transactions", id, "date", date)
         engine.createChange("transactions", id, "amount", amount)
@@ -1054,8 +1230,13 @@ class SyncManager(
 
     /**
      * Get the number of pending changes.
+     *
+     * @throws IllegalStateException if not initialized
      */
-    fun getPendingChangeCount(): Int = engine.getPendingMessages().size
+    fun getPendingChangeCount(): Int {
+        requireInitialized()
+        return engine.getPendingMessages().size
+    }
 
     /**
      * Get a summary of pending changes grouped by type.
@@ -1143,8 +1324,13 @@ class SyncManager(
 
     /**
      * Check if local and server are in sync.
+     *
+     * @throws IllegalStateException if not initialized
      */
-    fun isInSync(): Boolean = engine.isInSync()
+    fun isInSync(): Boolean {
+        requireInitialized()
+        return engine.isInSync()
+    }
 
     /**
      * Get the sync engine for advanced operations.

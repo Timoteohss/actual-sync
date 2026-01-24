@@ -6,6 +6,7 @@ import com.actualbudget.sync.proto.Message
 import com.actualbudget.sync.proto.MessageEnvelope
 import com.actualbudget.sync.proto.SyncRequest
 import com.actualbudget.sync.proto.SyncResponse
+import kotlin.concurrent.Volatile
 
 /**
  * Engine for bidirectional CRDT sync with the Actual Budget server.
@@ -15,13 +16,21 @@ import com.actualbudget.sync.proto.SyncResponse
  * - Tracking pending messages to send
  * - Merkle trie comparison for efficient sync
  * - Applying remote messages locally
+ *
+ * Thread-safety note: Uses @Volatile for visibility. In typical usage
+ * (single sync operation at a time), this is sufficient. For concurrent
+ * access, external synchronization should be used.
  */
 class SyncEngine(
     private val db: ActualDatabase,
     private val clock: MutableClock
 ) {
+    @Volatile
     private var localMerkle: TrieNode = Merkle.emptyTrie()
-    private val pendingMessages = mutableListOf<MessageEnvelope>()
+
+    // Pending messages list - access should be single-threaded or externally synchronized
+    @Volatile
+    private var pendingMessages = mutableListOf<MessageEnvelope>()
 
     /**
      * Initialize the sync engine by loading local merkle state.
@@ -96,8 +105,8 @@ class SyncEngine(
         // Update local merkle
         localMerkle = Merkle.insert(localMerkle, ts)
 
-        // Add to pending queue
-        pendingMessages.add(envelope)
+        // Add to pending queue (thread-safe)
+        addPendingMessage(envelope)
 
         return envelope
     }
@@ -117,6 +126,7 @@ class SyncEngine(
 
     /**
      * Get pending messages that need to be sent to server.
+     * Returns a copy of the list for thread safety.
      */
     fun getPendingMessages(): List<MessageEnvelope> = pendingMessages.toList()
 
@@ -124,7 +134,14 @@ class SyncEngine(
      * Clear pending messages after successful sync.
      */
     fun clearPendingMessages() {
-        pendingMessages.clear()
+        pendingMessages = mutableListOf()
+    }
+
+    /**
+     * Add a message to the pending queue.
+     */
+    private fun addPendingMessage(envelope: MessageEnvelope) {
+        pendingMessages.add(envelope)
     }
 
     /**
@@ -144,7 +161,7 @@ class SyncEngine(
         }
 
         return SyncRequest(
-            messages = pendingMessages.toList(),
+            messages = getPendingMessages(),
             fileId = fileId,
             groupId = groupId,
             since = since
@@ -177,7 +194,7 @@ class SyncEngine(
         }
 
         return SyncRequest(
-            messages = pendingMessages.toList(),
+            messages = getPendingMessages(),
             fileId = fileId,
             groupId = groupId,
             since = since

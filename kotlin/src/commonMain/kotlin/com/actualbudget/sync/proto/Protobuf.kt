@@ -16,21 +16,25 @@ object Protobuf {
 
     /**
      * Encode a varint (variable-length integer).
+     * Uses fixed-size local array to avoid List/MutableList allocations.
+     * Max varint size is 10 bytes for 64-bit values.
      */
     fun encodeVarint(value: Long): ByteArray {
         if (value == 0L) return byteArrayOf(0)
 
-        val result = mutableListOf<Byte>()
+        // Local buffer - max 10 bytes for 64-bit varint
+        val buffer = ByteArray(10)
         var v = value
+        var pos = 0
         while (v != 0L) {
-            var b = (v and 0x7F).toByte()
+            var b = (v and 0x7F).toInt()
             v = v ushr 7
             if (v != 0L) {
-                b = (b.toInt() or 0x80).toByte()
+                b = b or 0x80
             }
-            result.add(b)
+            buffer[pos++] = b.toByte()
         }
-        return result.toByteArray()
+        return buffer.copyOf(pos)
     }
 
     fun encodeVarint(value: Int): ByteArray = encodeVarint(value.toLong())
@@ -132,25 +136,43 @@ class ProtobufReader(private val data: ByteArray) {
 
 /**
  * Protobuf writer for building messages.
+ * Uses a growable ByteArray buffer to avoid List<Byte> overhead.
  */
 class ProtobufWriter {
-    private val buffer = mutableListOf<Byte>()
+    private var buffer = ByteArray(64)  // Initial capacity
+    private var size = 0
+
+    private fun ensureCapacity(additional: Int) {
+        val required = size + additional
+        if (required > buffer.size) {
+            // Grow by at least 2x or to required size
+            val newSize = maxOf(buffer.size * 2, required)
+            buffer = buffer.copyOf(newSize)
+        }
+    }
+
+    private fun appendBytes(bytes: ByteArray) {
+        if (bytes.isEmpty()) return
+        ensureCapacity(bytes.size)
+        bytes.copyInto(buffer, size)
+        size += bytes.size
+    }
 
     fun writeString(fieldNumber: Int, value: String) {
-        buffer.addAll(Protobuf.encodeString(fieldNumber, value).toList())
+        appendBytes(Protobuf.encodeString(fieldNumber, value))
     }
 
     fun writeBytes(fieldNumber: Int, value: ByteArray) {
-        buffer.addAll(Protobuf.encodeBytes(fieldNumber, value).toList())
+        appendBytes(Protobuf.encodeBytes(fieldNumber, value))
     }
 
     fun writeBool(fieldNumber: Int, value: Boolean) {
-        buffer.addAll(Protobuf.encodeBool(fieldNumber, value).toList())
+        appendBytes(Protobuf.encodeBool(fieldNumber, value))
     }
 
     fun writeMessage(fieldNumber: Int, value: ByteArray) {
-        buffer.addAll(Protobuf.encodeMessage(fieldNumber, value).toList())
+        appendBytes(Protobuf.encodeMessage(fieldNumber, value))
     }
 
-    fun toByteArray(): ByteArray = buffer.toByteArray()
+    fun toByteArray(): ByteArray = buffer.copyOf(size)
 }
