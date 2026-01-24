@@ -48,9 +48,12 @@ actual class BudgetFileManager actual constructor() {
         // Read the zip file
         val zipData = NSData.dataWithContentsOfFile(zipPath) ?: return null
 
-        // Parse ZIP format manually (simplified - looking for db.sqlite)
+        // Parse ZIP format manually - extract db.sqlite and metadata.json
         val bytes = zipData.bytes?.reinterpret<ByteVar>() ?: return null
         val length = zipData.length.toInt()
+
+        var dbPath: String? = null
+        val filesToExtract = listOf("db.sqlite", "metadata.json")
 
         // ZIP local file header signature: 0x04034b50 (PK\x03\x04)
         var offset = 0
@@ -93,11 +96,11 @@ actual class BudgetFileManager actual constructor() {
 
             println("[BudgetFileManager] Found file: $fileName (compression: $compressionMethod, compressed: $compressedSize, uncompressed: $uncompressedSize)")
 
-            // Extract db.sqlite
-            if (fileName == "db.sqlite") {
-                val destPath = "$targetDir/db.sqlite"
+            // Extract files we care about (db.sqlite and metadata.json)
+            if (fileName in filesToExtract) {
+                val destPath = "$targetDir/$fileName"
 
-                when (compressionMethod) {
+                val extracted = when (compressionMethod) {
                     0 -> {
                         // Stored (uncompressed)
                         val fileData = ByteArray(uncompressedSize)
@@ -106,9 +109,9 @@ actual class BudgetFileManager actual constructor() {
                         }
                         val nsFileData = fileData.toNSData()
                         if (nsFileData.writeToFile(destPath, atomically = true)) {
-                            println("[BudgetFileManager] Extracted db.sqlite (uncompressed) to $destPath")
-                            return destPath
-                        }
+                            println("[BudgetFileManager] Extracted $fileName (uncompressed) to $destPath")
+                            true
+                        } else false
                     }
                     8 -> {
                         // DEFLATE compression - use zlib
@@ -121,16 +124,22 @@ actual class BudgetFileManager actual constructor() {
                         if (decompressed != null) {
                             val nsFileData = decompressed.toNSData()
                             if (nsFileData.writeToFile(destPath, atomically = true)) {
-                                println("[BudgetFileManager] Extracted db.sqlite (deflate) to $destPath")
-                                return destPath
-                            }
+                                println("[BudgetFileManager] Extracted $fileName (deflate) to $destPath")
+                                true
+                            } else false
                         } else {
-                            println("[BudgetFileManager] Failed to decompress db.sqlite")
+                            println("[BudgetFileManager] Failed to decompress $fileName")
+                            false
                         }
                     }
                     else -> {
                         println("[BudgetFileManager] Unsupported compression method: $compressionMethod")
+                        false
                     }
+                }
+
+                if (extracted && fileName == "db.sqlite") {
+                    dbPath = destPath
                 }
             }
 
@@ -139,8 +148,10 @@ actual class BudgetFileManager actual constructor() {
             offset = dataOffset + dataSize
         }
 
-        println("[BudgetFileManager] db.sqlite not found in zip")
-        return null
+        if (dbPath == null) {
+            println("[BudgetFileManager] db.sqlite not found in zip")
+        }
+        return dbPath
     }
 
     /**
@@ -246,6 +257,89 @@ actual class BudgetFileManager actual constructor() {
     actual fun getTempDir(): String {
         return NSTemporaryDirectory().trimEnd('/')
     }
+
+    // ============ Multi-Budget Support ============
+
+    actual fun getBudgetsDirectory(): String {
+        val paths = NSSearchPathForDirectoriesInDomains(
+            NSLibraryDirectory,
+            NSUserDomainMask,
+            true
+        )
+        val library = paths.firstOrNull() as? String ?: NSTemporaryDirectory()
+        return "$library/ActualBudget"
+    }
+
+    actual fun listBudgetFolders(): List<String> {
+        val budgetsDir = getBudgetsDirectory()
+        val fileManager = NSFileManager.defaultManager
+
+        // Create directory if it doesn't exist
+        if (!fileManager.fileExistsAtPath(budgetsDir)) {
+            return emptyList()
+        }
+
+        return try {
+            val contents = fileManager.contentsOfDirectoryAtPath(budgetsDir, error = null)
+            contents?.mapNotNull { item ->
+                val name = item as? String ?: return@mapNotNull null
+                val fullPath = "$budgetsDir/$name"
+                // Only include directories that have a metadata.json file
+                if (isDirectory(fullPath) && fileManager.fileExistsAtPath("$fullPath/metadata.json")) {
+                    name
+                } else {
+                    null
+                }
+            } ?: emptyList()
+        } catch (e: Exception) {
+            println("[BudgetFileManager] Error listing budget folders: ${e.message}")
+            emptyList()
+        }
+    }
+
+    actual fun createBudgetFolder(budgetId: String): String? {
+        val budgetsDir = getBudgetsDirectory()
+        val budgetPath = "$budgetsDir/$budgetId"
+        val fileManager = NSFileManager.defaultManager
+
+        return try {
+            // Create budgets directory if needed
+            if (!fileManager.fileExistsAtPath(budgetsDir)) {
+                fileManager.createDirectoryAtPath(
+                    budgetsDir,
+                    withIntermediateDirectories = true,
+                    attributes = null,
+                    error = null
+                )
+            }
+
+            // Create budget folder
+            if (!fileManager.fileExistsAtPath(budgetPath)) {
+                fileManager.createDirectoryAtPath(
+                    budgetPath,
+                    withIntermediateDirectories = true,
+                    attributes = null,
+                    error = null
+                )
+            }
+
+            println("[BudgetFileManager] Created budget folder: $budgetPath")
+            budgetPath
+        } catch (e: Exception) {
+            println("[BudgetFileManager] Error creating budget folder: ${e.message}")
+            null
+        }
+    }
+
+    actual fun isDirectory(path: String): Boolean {
+        val fileManager = NSFileManager.defaultManager
+        return memScoped {
+            val isDir = alloc<BooleanVar>()
+            fileManager.fileExistsAtPath(path, isDirectory = isDir.ptr) && isDir.value
+        }
+    }
+
+    // ============ Private Helpers ============
 
     private fun ByteArray.toNSData(): NSData {
         return this.usePinned { pinned ->

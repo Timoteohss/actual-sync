@@ -4,6 +4,8 @@ import com.oldguy.common.io.File
 import com.oldguy.common.io.FileMode
 import com.oldguy.common.io.ZipFile
 import kotlin.time.Clock
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.encodeToString
@@ -28,9 +30,49 @@ class BudgetExporter(
     }
 
     /**
+     * Generate a budget ID in Actual's format: [Budget-Name-Slug]-[7-char-UUID]
+     *
+     * Examples:
+     * - "My Finances" -> "My-Finances-da5fda6"
+     * - "Budget 2024!" -> "Budget-2024--abc1234"
+     */
+    @OptIn(ExperimentalUuidApi::class)
+    fun generateBudgetId(budgetName: String): String {
+        // Replace spaces and non-alphanumeric characters with hyphens
+        val slug = budgetName.replace(Regex("[^A-Za-z0-9]"), "-")
+        // Get first 7 characters of a UUID (lowercase like Actual does)
+        val uuidSuffix = Uuid.random().toString().take(7)
+        return "$slug-$uuidSuffix"
+    }
+
+    /**
+     * Try to read existing metadata.json file.
+     * Returns null if file doesn't exist or can't be parsed.
+     */
+    private fun readExistingMetadata(metadataPath: String): BudgetMetadata? {
+        return try {
+            val metadataBytes = fileManager.readFile(metadataPath)
+            if (metadataBytes != null) {
+                val metadataJson = metadataBytes.decodeToString()
+                println("[BudgetExporter] Found existing metadata.json at $metadataPath")
+                json.decodeFromString<BudgetMetadata>(metadataJson)
+            } else {
+                println("[BudgetExporter] No existing metadata.json at $metadataPath")
+                null
+            }
+        } catch (e: Exception) {
+            println("[BudgetExporter] Failed to read existing metadata: ${e.message}")
+            null
+        }
+    }
+
+    /**
      * Prepare a budget for upload to server.
      *
-     * @param budgetId Unique identifier for the budget
+     * If a metadata.json file exists next to the database, its `id` will be preserved
+     * to maintain consistency with the server. Otherwise, a new ID is generated.
+     *
+     * @param budgetId Cloud file ID (UUID) for the budget
      * @param budgetName Display name of the budget
      * @param dbPath Path to the budget's db.sqlite file
      * @param groupId Optional group ID for sync operations
@@ -46,6 +88,13 @@ class BudgetExporter(
         groupId: String? = null,
         encryptKeyId: String? = null
     ): ByteArray {
+        // Try to read existing metadata.json to preserve the original ID
+        val existingMetadataPath = dbPath.substringBeforeLast("/") + "/metadata.json"
+        val existingMetadata = readExistingMetadata(existingMetadataPath)
+
+        // Use existing ID if available, otherwise generate a new one
+        val budgetLocalId = existingMetadata?.id ?: generateBudgetId(budgetName)
+        println("[BudgetExporter] Using local ID: $budgetLocalId (from existing: ${existingMetadata != null})")
         val tempDir = fileManager.getTempDir()
         val workDirName = "budget_export_$budgetId"
         val workDir = "$tempDir/$workDirName"
@@ -73,14 +122,17 @@ class BudgetExporter(
                 throw Exception("Source database does not exist at: $dbPath")
             }
 
+            // Copy the database file
+            // Note: iOS now uses DELETE journal mode (not WAL) so no extra files needed
             if (!fileManager.copy(dbPath, tempDbPath)) {
                 throw Exception("Failed to copy database to temp location")
             }
             println("[BudgetExporter] Copied database to $tempDbPath")
 
-            // Step 2: Clear cache tables in the temp database
+            // Step 2: Clear cache tables in the temp database (if they exist)
+            // These tables are used by Actual's web app but may not exist in ActualSync
             clearCacheTables(tempDbPath)
-            println("[BudgetExporter] Cleared cache tables")
+            println("[BudgetExporter] Processed cache tables")
 
             // Step 3: Create metadata.json
             val now = Clock.System.now()
@@ -101,7 +153,7 @@ class BudgetExporter(
             }
 
             val metadata = BudgetMetadata(
-                id = budgetId,
+                id = budgetLocalId,
                 budgetName = budgetName,
                 resetClock = true,
                 cloudFileId = budgetId,
@@ -109,6 +161,7 @@ class BudgetExporter(
                 lastUploaded = timestamp,
                 encryptKeyId = encryptKeyId
             )
+            println("[BudgetExporter] Metadata: id=$budgetLocalId, cloudFileId=$budgetId, groupId=$groupId")
 
             val metadataJson = json.encodeToString(metadata)
             if (!fileManager.writeFile(metadataPath, metadataJson.encodeToByteArray())) {
@@ -121,16 +174,28 @@ class BudgetExporter(
             val dbFile = File(tempDbPath)
             val metadataFile = File(metadataPath)
 
+            // Debug: check file sizes before zipping
+            println("[BudgetExporter] DB file exists: ${dbFile.exists}, size: ${if (dbFile.exists) dbFile.size else 0}")
+            println("[BudgetExporter] Metadata file exists: ${metadataFile.exists}, size: ${if (metadataFile.exists) metadataFile.size else 0}")
+
             ZipFile(zipFile, FileMode.Write).use { zip ->
-                zip.zipFile(dbFile)
-                zip.zipFile(metadataFile)
+                // Explicitly specify entry names to ensure they're at ZIP root
+                zip.zipFile(dbFile, "db.sqlite")
+                zip.zipFile(metadataFile, "metadata.json")
             }
             println("[BudgetExporter] Created ZIP file at $zipPath")
 
-            // Step 5: Read ZIP as ByteArray
+            // Step 5: Read ZIP as ByteArray and validate
             val zipData = fileManager.readFile(zipPath)
                 ?: throw Exception("Failed to read ZIP file")
             println("[BudgetExporter] Read ZIP file (${zipData.size} bytes)")
+
+            // Sanity check: ZIP should be at least as big as the db file
+            val expectedMinSize = if (dbFile.exists) dbFile.size.toLong() else 0L
+            if (zipData.size < expectedMinSize / 2) {
+                println("[BudgetExporter] WARNING: ZIP size (${zipData.size}) is much smaller than DB size ($expectedMinSize)")
+                println("[BudgetExporter] ZIP may not contain the database properly!")
+            }
 
             // Step 6: Clean up temp files
             fileManager.delete(workDir)
@@ -144,6 +209,13 @@ class BudgetExporter(
         }
     }
 }
+
+/**
+ * Checkpoint WAL to flush all data from WAL file to main database file.
+ * This is needed before copying the database because iOS uses WAL mode.
+ * Platform-specific implementation due to different SQLite drivers.
+ */
+expect fun checkpointDatabase(dbPath: String)
 
 /**
  * Clear kvcache and kvcache_key tables in the database.

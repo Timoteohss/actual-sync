@@ -56,4 +56,37 @@ expect class BudgetFileManager() {
      * @return Path to temporary directory
      */
     fun getTempDir(): String
+
+    // ============ Multi-Budget Support ============
+
+    /**
+     * Get the directory where all budgets are stored.
+     * Each budget has its own subfolder containing db.sqlite and metadata.json.
+     *
+     * @return Path to budgets directory (e.g., /Library/ActualBudget)
+     */
+    fun getBudgetsDirectory(): String
+
+    /**
+     * List all budget folder names in the budgets directory.
+     *
+     * @return List of budget folder names (which are budget IDs)
+     */
+    fun listBudgetFolders(): List<String>
+
+    /**
+     * Create a folder for a new budget.
+     *
+     * @param budgetId The budget ID (will be the folder name)
+     * @return Path to the created folder, or null if creation failed
+     */
+    fun createBudgetFolder(budgetId: String): String?
+
+    /**
+     * Check if a path is a directory.
+     *
+     * @param path The path to check
+     * @return true if path is a directory, false otherwise
+     */
+    fun isDirectory(path: String): Boolean
 }

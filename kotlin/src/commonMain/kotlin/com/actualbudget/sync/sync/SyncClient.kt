@@ -6,6 +6,7 @@ import io.ktor.client.call.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
+import io.ktor.util.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -153,10 +154,13 @@ class SyncClient(
         groupId: String? = null
     ): UploadResponse {
         println("[SyncClient] Uploading budget: $fileId ($name), size: ${data.size} bytes")
+        // URL encode the name as the server expects decodeURIComponent()
+        val encodedName = name.encodeURLParameter()
         val response = httpClient.post("$serverUrl/sync/upload-user-file") {
             authToken?.let { header("X-ACTUAL-TOKEN", it) }
             header("X-ACTUAL-FILE-ID", fileId)
-            header("X-ACTUAL-NAME", name)
+            header("X-ACTUAL-NAME", encodedName)
+            header("X-ACTUAL-FORMAT", "2")
             groupId?.let { header("X-ACTUAL-GROUP-ID", it) }
             contentType(ContentType("application", "encrypted-file"))
             setBody(data)

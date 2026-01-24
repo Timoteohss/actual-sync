@@ -122,13 +122,15 @@ CREATE TABLE rules (
 );
 
 -- CRDT messages log (for sync) - matches Actual Budget's schema
+-- Note: value is TEXT not BLOB because web app stores serialized strings (e.g., "S:value")
+-- and sql.js returns BLOB as Uint8Array which breaks protobuf serialization
 CREATE TABLE messages_crdt (
     id INTEGER PRIMARY KEY,
     timestamp TEXT NOT NULL UNIQUE,
     dataset TEXT NOT NULL,
     row TEXT NOT NULL,
     column TEXT NOT NULL,
-    value BLOB NOT NULL
+    value TEXT NOT NULL
 );
 
 CREATE INDEX messages_crdt_search ON messages_crdt(dataset, row, column, timestamp);

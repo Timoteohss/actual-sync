@@ -111,3 +111,21 @@ fun createOrOpenDatabase(dbName: String): ActualDatabase {
 fun createBudgetFileManager(): BudgetFileManager {
     return BudgetFileManager()
 }
+
+/**
+ * Create an ActualDatabase for an existing database file at a specific path.
+ * This is used for multi-budget support where each budget has its own folder.
+ *
+ * @param dbPath Full path to the database file (e.g., /Library/ActualBudget/My-Budget-abc123/db.sqlite)
+ * @return ActualDatabase instance
+ */
+fun createDatabaseForExistingFileAtPath(dbPath: String): ActualDatabase {
+    // Extract the directory and filename from the full path
+    val directory = dbPath.substringBeforeLast("/")
+    val fileName = dbPath.substringAfterLast("/")
+
+    println("[Helpers] Opening database at path: $dbPath")
+    println("[Helpers] Directory: $directory, Filename: $fileName")
+
+    return com.actualbudget.sync.db.createDatabaseForExistingAtPath(directory, fileName)
+}

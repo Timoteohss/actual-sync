@@ -126,6 +126,7 @@ class SyncManager(
 
     /**
      * Extract a downloaded budget zip and install the database.
+     * Also copies metadata.json alongside the database for future exports.
      *
      * @param zipData The raw zip file bytes from downloadBudgetFile()
      * @param targetDbPath The path where the database should be installed
@@ -139,7 +140,7 @@ class SyncManager(
             println("[SyncManager] Extracting budget to temp dir: $tempDir")
             println("[SyncManager] Zip data size: ${zipData.size} bytes")
 
-            // Extract the zip
+            // Extract the zip (extracts both db.sqlite and metadata.json)
             val extractedDbPath = fileManager.extractBudgetZip(zipData, tempDir)
             if (extractedDbPath == null) {
                 println("[SyncManager] Failed to extract db.sqlite from zip")
@@ -158,7 +159,7 @@ class SyncManager(
                 fileManager.delete("$targetDbPath-shm")
             }
 
-            // Copy to target location
+            // Copy database to target location
             val success = fileManager.copy(extractedDbPath, targetDbPath)
 
             if (success) {
@@ -168,6 +169,27 @@ class SyncManager(
                     println("[SyncManager] Verified: target file exists")
                 } else {
                     println("[SyncManager] ERROR: target file does not exist after copy!")
+                }
+
+                // Also copy metadata.json if it was extracted
+                val extractedMetadataPath = "$tempDir/metadata.json"
+                if (fileManager.exists(extractedMetadataPath)) {
+                    // Derive target metadata path from db path (same directory)
+                    val targetDir = targetDbPath.substringBeforeLast("/")
+                    val targetMetadataPath = "$targetDir/metadata.json"
+
+                    // Delete existing metadata
+                    if (fileManager.exists(targetMetadataPath)) {
+                        fileManager.delete(targetMetadataPath)
+                    }
+
+                    if (fileManager.copy(extractedMetadataPath, targetMetadataPath)) {
+                        println("[SyncManager] Copied metadata.json to $targetMetadataPath")
+                    } else {
+                        println("[SyncManager] Warning: Failed to copy metadata.json (non-fatal)")
+                    }
+                } else {
+                    println("[SyncManager] No metadata.json found in zip (older format?)")
                 }
             } else {
                 println("[SyncManager] Failed to copy database to target path")
@@ -199,6 +221,143 @@ class SyncManager(
         }
 
         return extractAndInstallBudget(zipData, targetDbPath)
+    }
+
+    // ============ Multi-Budget Support ============
+
+    /**
+     * Download and install a budget to the multi-budget folder structure.
+     * The budget will be installed to: {budgetsDirectory}/{budgetId}/db.sqlite
+     *
+     * @param fileId The server file ID to download
+     * @return The budget folder path if successful, null otherwise
+     */
+    suspend fun downloadAndInstallBudgetToFolder(fileId: String): String? {
+        val zipData = downloadBudgetFile(fileId)
+        if (zipData == null) {
+            println("[SyncManager] Failed to download budget")
+            return null
+        }
+
+        return extractAndInstallBudgetToFolder(zipData)
+    }
+
+    /**
+     * Extract a budget zip and install it to the multi-budget folder structure.
+     * Reads the budget ID from metadata.json and creates the folder structure.
+     *
+     * @param zipData The raw zip file bytes
+     * @return The budget folder path if successful, null otherwise
+     */
+    fun extractAndInstallBudgetToFolder(zipData: ByteArray): String? {
+        return try {
+            val fileManager = BudgetFileManager()
+            val tempDir = fileManager.getTempDir() + "/budget_extract_temp"
+
+            println("[SyncManager] Extracting budget to temp dir: $tempDir")
+
+            // Clean up temp dir if it exists
+            if (fileManager.exists(tempDir)) {
+                fileManager.delete(tempDir)
+            }
+
+            // Extract the zip to temp directory
+            val extractedDbPath = fileManager.extractBudgetZip(zipData, tempDir)
+            if (extractedDbPath == null) {
+                println("[SyncManager] Failed to extract db.sqlite from zip")
+                return null
+            }
+
+            // Read metadata to get budget ID
+            val metadataPath = "$tempDir/metadata.json"
+            val metadataBytes = fileManager.readFile(metadataPath)
+            if (metadataBytes == null) {
+                println("[SyncManager] No metadata.json found in zip")
+                fileManager.delete(tempDir)
+                return null
+            }
+
+            var metadataJson = metadataBytes.decodeToString()
+            val budgetId = extractBudgetIdFromMetadata(metadataJson)
+            if (budgetId == null) {
+                println("[SyncManager] Failed to extract budget ID from metadata")
+                fileManager.delete(tempDir)
+                return null
+            }
+
+            println("[SyncManager] Budget ID from metadata: $budgetId")
+
+            // Create budget folder
+            val budgetFolder = fileManager.createBudgetFolder(budgetId)
+            if (budgetFolder == null) {
+                println("[SyncManager] Failed to create budget folder")
+                fileManager.delete(tempDir)
+                return null
+            }
+
+            val targetDbPath = "$budgetFolder/db.sqlite"
+            val targetMetadataPath = "$budgetFolder/metadata.json"
+
+            // Delete existing files
+            if (fileManager.exists(targetDbPath)) {
+                fileManager.delete(targetDbPath)
+                fileManager.delete("$targetDbPath-wal")
+                fileManager.delete("$targetDbPath-shm")
+            }
+            if (fileManager.exists(targetMetadataPath)) {
+                fileManager.delete(targetMetadataPath)
+            }
+
+            // Copy files to budget folder
+            val dbCopied = fileManager.copy(extractedDbPath, targetDbPath)
+            val metadataCopied = fileManager.copy(metadataPath, targetMetadataPath)
+
+            // Clean up temp directory
+            fileManager.delete(tempDir)
+
+            if (dbCopied && metadataCopied) {
+                println("[SyncManager] Budget installed to folder: $budgetFolder")
+                budgetFolder
+            } else {
+                println("[SyncManager] Failed to copy files to budget folder")
+                null
+            }
+        } catch (e: Exception) {
+            println("[SyncManager] Error installing budget to folder: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Get the path to a budget's database file.
+     *
+     * @param budgetId The budget ID (folder name)
+     * @return Path to the db.sqlite file
+     */
+    fun getBudgetDbPath(budgetId: String): String {
+        val fileManager = BudgetFileManager()
+        return "${fileManager.getBudgetsDirectory()}/$budgetId/db.sqlite"
+    }
+
+    /**
+     * Get the path to a budget's metadata file.
+     *
+     * @param budgetId The budget ID (folder name)
+     * @return Path to the metadata.json file
+     */
+    fun getBudgetMetadataPath(budgetId: String): String {
+        val fileManager = BudgetFileManager()
+        return "${fileManager.getBudgetsDirectory()}/$budgetId/metadata.json"
+    }
+
+    /**
+     * Extract budget ID from metadata JSON string.
+     */
+    private fun extractBudgetIdFromMetadata(json: String): String? {
+        // Simple extraction without full JSON parsing
+        // Looking for "id": "value"
+        val idPattern = """"id"\s*:\s*"([^"]+)"""".toRegex()
+        return idPattern.find(json)?.groupValues?.get(1)
     }
 
     /**

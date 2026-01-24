@@ -30,13 +30,13 @@ class SyncRepository(private val db: ActualDatabase) {
      * Apply a single CRDT message.
      */
     private fun applyMessage(timestamp: String, message: Message) {
-        // Store in CRDT log (value stored as BLOB)
+        // Store in CRDT log (value stored as TEXT to match web app format)
         db.actualDatabaseQueries.insertMessage(
             timestamp = timestamp,
             dataset = message.dataset,
             row = message.row,
             column = message.column,
-            value_ = message.value.encodeToByteArray()
+            value_ = message.value
         )
 
         // Parse the value

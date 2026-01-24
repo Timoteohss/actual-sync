@@ -71,13 +71,13 @@ class SyncEngine(
 
         val envelope = MessageEnvelope.create(ts.toString(), message)
 
-        // Store in local database (value stored as BLOB)
+        // Store in local database (value stored as TEXT to match web app format)
         db.actualDatabaseQueries.insertMessage(
             timestamp = ts.toString(),
             dataset = dataset,
             row = row,
             column = column,
-            value_ = encodedValue.encodeToByteArray()
+            value_ = encodedValue
         )
 
         // Apply the change to entity tables immediately
@@ -200,9 +200,6 @@ class SyncEngine(
         for (envelope in response.messages) {
             if (envelope.isEncrypted) {
                 skippedEncrypted++
-                if (skippedEncrypted <= 5) {
-                    println("[SyncEngine] SKIPPING encrypted message: ${envelope.timestamp}")
-                }
             }
             if (!envelope.isEncrypted) {
                 try {
@@ -218,10 +215,7 @@ class SyncEngine(
                         applyMessage(envelope.timestamp, message)
                         applied++
                     } else {
-                        // Skip - already have this message
-                        println("[SyncEngine] SKIP (exists): ${message.dataset}.${message.column} = '${message.value.take(50)}' (row: ${message.row.take(20)})")
-
-                        // Update local merkle
+                        // Skip - already have this message, just update merkle
                         if (ts != null) {
                             localMerkle = Merkle.insert(localMerkle, ts)
                         }
@@ -254,16 +248,13 @@ class SyncEngine(
      * Apply a CRDT message to the database.
      */
     private fun applyMessage(timestamp: String, message: Message) {
-        // Debug logging for all messages
-        println("[SyncEngine] MSG: ${message.dataset}.${message.column} = '${message.value.take(50)}' (row: ${message.row.take(20)})")
-
-        // Store in CRDT log (value stored as BLOB)
+        // Store in CRDT log (value stored as TEXT to match web app format)
         db.actualDatabaseQueries.insertMessage(
             timestamp = timestamp,
             dataset = message.dataset,
             row = message.row,
             column = message.column,
-            value_ = message.value.encodeToByteArray()
+            value_ = message.value
         )
 
         // Parse the value

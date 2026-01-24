@@ -13,18 +13,24 @@ actual class BudgetFileManager actual constructor() {
                 targetDirFile.mkdirs()
             }
 
+            var dbPath: String? = null
+            val filesToExtract = listOf("db.sqlite", "metadata.json")
+
             ZipInputStream(zipData.inputStream()).use { zis ->
                 var entry = zis.nextEntry
                 while (entry != null) {
                     println("[BudgetFileManager] Found file: ${entry.name}")
 
-                    if (entry.name == "db.sqlite") {
-                        val destFile = File(targetDir, "db.sqlite")
+                    if (entry.name in filesToExtract) {
+                        val destFile = File(targetDir, entry.name)
                         FileOutputStream(destFile).use { fos ->
                             zis.copyTo(fos)
                         }
-                        println("[BudgetFileManager] Extracted db.sqlite to ${destFile.absolutePath}")
-                        return destFile.absolutePath
+                        println("[BudgetFileManager] Extracted ${entry.name} to ${destFile.absolutePath}")
+
+                        if (entry.name == "db.sqlite") {
+                            dbPath = destFile.absolutePath
+                        }
                     }
 
                     zis.closeEntry()
@@ -32,8 +38,10 @@ actual class BudgetFileManager actual constructor() {
                 }
             }
 
-            println("[BudgetFileManager] db.sqlite not found in zip")
-            null
+            if (dbPath == null) {
+                println("[BudgetFileManager] db.sqlite not found in zip")
+            }
+            dbPath
         } catch (e: Exception) {
             println("[BudgetFileManager] Error extracting zip: ${e.message}")
             null
@@ -82,5 +90,39 @@ actual class BudgetFileManager actual constructor() {
 
     actual fun getTempDir(): String {
         return System.getProperty("java.io.tmpdir") ?: "/tmp"
+    }
+
+    // ============ Multi-Budget Support ============
+
+    actual fun getBudgetsDirectory(): String {
+        return System.getProperty("user.home") + "/.actual-budget/budgets"
+    }
+
+    actual fun listBudgetFolders(): List<String> {
+        val budgetsDir = File(getBudgetsDirectory())
+        if (!budgetsDir.exists()) {
+            return emptyList()
+        }
+
+        return budgetsDir.listFiles()
+            ?.filter { it.isDirectory && File(it, "metadata.json").exists() }
+            ?.map { it.name }
+            ?: emptyList()
+    }
+
+    actual fun createBudgetFolder(budgetId: String): String? {
+        return try {
+            val budgetDir = File(getBudgetsDirectory(), budgetId)
+            budgetDir.mkdirs()
+            println("[BudgetFileManager] Created budget folder: ${budgetDir.absolutePath}")
+            budgetDir.absolutePath
+        } catch (e: Exception) {
+            println("[BudgetFileManager] Error creating budget folder: ${e.message}")
+            null
+        }
+    }
+
+    actual fun isDirectory(path: String): Boolean {
+        return File(path).isDirectory
     }
 }
