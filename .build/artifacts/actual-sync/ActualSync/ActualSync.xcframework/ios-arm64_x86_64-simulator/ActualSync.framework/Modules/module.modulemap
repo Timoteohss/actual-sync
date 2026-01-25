@@ -1,5 +1,0 @@
-framework module "ActualSync" {
-    umbrella header "ActualSync.h"
-    export *
-    module * { export * }
-}
