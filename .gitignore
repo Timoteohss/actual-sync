@@ -36,6 +36,11 @@ local.properties
 Pods/
 DerivedData/
 
+# Swift Package Manager
+.swiftpm/
+.build/
+Package.resolved
+
 # SQLite databases (generated during testing)
 *.db
 *.sqlite
