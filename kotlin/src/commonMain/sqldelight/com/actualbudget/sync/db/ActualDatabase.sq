@@ -701,3 +701,10 @@ SELECT * FROM accounts WHERE offbudget = 1 AND closed = 0 AND tombstone = 0 ORDE
 -- Get closed accounts ordered by sort_order
 getClosedAccountsOrdered:
 SELECT * FROM accounts WHERE closed = 1 AND tombstone = 0 ORDER BY sort_order;
+
+-- ============= PAYEE MERGE QUERIES =============
+
+-- Get transactions by payee ID (for merging payees)
+-- Note: description column stores the payee ID
+getTransactionsByPayee:
+SELECT * FROM transactions WHERE description = ? AND tombstone = 0;

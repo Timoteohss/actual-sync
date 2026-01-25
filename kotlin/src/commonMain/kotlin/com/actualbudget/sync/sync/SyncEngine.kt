@@ -24,7 +24,7 @@ import kotlin.concurrent.Volatile
 class SyncEngine(
     private val db: ActualDatabase,
     private val clock: MutableClock
-) {
+) : ChangeEngine {
     @Volatile
     private var localMerkle: TrieNode = Merkle.emptyTrie()
 
@@ -67,7 +67,7 @@ class SyncEngine(
      * Create a local change and generate a CRDT message.
      * The message is added to pending queue for next sync.
      */
-    fun createChange(dataset: String, row: String, column: String, value: Any?): MessageEnvelope {
+    override fun createChange(dataset: String, row: String, column: String, value: Any?): MessageEnvelope {
         val ts = clock.send()
         val encodedValue = encodeValue(value)
 

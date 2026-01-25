@@ -50,36 +50,47 @@ fun createDriverForExistingDb(dbName: String): SqlDriver {
     val basePath = getLibraryPath()
     println("[DatabaseDriverFactory] Opening existing db: $dbName at basePath: $basePath")
 
-    return NativeSqliteDriver(
+    val driver = NativeSqliteDriver(
         configuration = DatabaseConfiguration(
             name = dbName,
             version = DatabaseConstants.SCHEMA_VERSION,
             // Use DELETE journal mode like Actual Budget does
             journalMode = JournalMode.DELETE,
             create = { connection ->
-                // Create only our custom sync_metadata table if it doesn't exist
-                // The downloaded database already has Actual's tables (accounts, payees, etc.)
-                println("[DatabaseDriverFactory] Creating sync_metadata table if needed")
-                connection.rawExecSql("""
-                    CREATE TABLE IF NOT EXISTS sync_metadata (
-                        key TEXT PRIMARY KEY NOT NULL,
-                        value TEXT
-                    )
-                """.trimIndent())
-                // Ensure zero_budgets has tombstone column
-                addMissingColumns(connection)
+                println("[DatabaseDriverFactory] Create callback - adding sync tables")
+                ensureSyncTablesExist(connection)
             },
             upgrade = { connection, oldVersion, newVersion ->
                 println("[DatabaseDriverFactory] Upgrading from $oldVersion to $newVersion")
-                if (oldVersion < 2) {
-                    addMissingColumns(connection)
-                }
+                ensureSyncTablesExist(connection)
             },
             extendedConfig = DatabaseConfiguration.Extended(
                 basePath = basePath  // Explicitly set the base path
             )
         )
     )
+
+    // IMPORTANT: Always ensure sync tables exist after opening
+    // The create/upgrade callbacks may not run for downloaded databases
+    println("[DatabaseDriverFactory] Ensuring sync tables exist after open")
+    driver.execute(null, "CREATE TABLE IF NOT EXISTS sync_metadata (key TEXT PRIMARY KEY NOT NULL, value TEXT)", 0)
+
+    return driver
+}
+
+/**
+ * Ensure sync-related tables exist in the database.
+ * This is called for downloaded databases that may not have our custom tables.
+ */
+private fun ensureSyncTablesExist(connection: co.touchlab.sqliter.DatabaseConnection) {
+    println("[DatabaseDriverFactory] Creating sync_metadata table if needed")
+    connection.rawExecSql("""
+        CREATE TABLE IF NOT EXISTS sync_metadata (
+            key TEXT PRIMARY KEY NOT NULL,
+            value TEXT
+        )
+    """.trimIndent())
+    addMissingColumns(connection)
 }
 
 /**
@@ -115,32 +126,31 @@ fun createDatabaseForExisting(dbName: String): ActualDatabase {
 fun createDriverForExistingDbAtPath(basePath: String, dbName: String): SqlDriver {
     println("[DatabaseDriverFactory] Opening existing db: $dbName at basePath: $basePath")
 
-    return NativeSqliteDriver(
+    val driver = NativeSqliteDriver(
         configuration = DatabaseConfiguration(
             name = dbName,
             version = DatabaseConstants.SCHEMA_VERSION,
             journalMode = JournalMode.DELETE,
             create = { connection ->
-                println("[DatabaseDriverFactory] Creating sync_metadata table if needed")
-                connection.rawExecSql("""
-                    CREATE TABLE IF NOT EXISTS sync_metadata (
-                        key TEXT PRIMARY KEY NOT NULL,
-                        value TEXT
-                    )
-                """.trimIndent())
-                addMissingColumns(connection)
+                println("[DatabaseDriverFactory] Create callback - adding sync tables")
+                ensureSyncTablesExist(connection)
             },
             upgrade = { connection, oldVersion, newVersion ->
                 println("[DatabaseDriverFactory] Upgrading from $oldVersion to $newVersion")
-                if (oldVersion < 2) {
-                    addMissingColumns(connection)
-                }
+                ensureSyncTablesExist(connection)
             },
             extendedConfig = DatabaseConfiguration.Extended(
                 basePath = basePath
             )
         )
     )
+
+    // IMPORTANT: Always ensure sync tables exist after opening
+    // The create/upgrade callbacks may not run for downloaded databases
+    println("[DatabaseDriverFactory] Ensuring sync tables exist after open")
+    driver.execute(null, "CREATE TABLE IF NOT EXISTS sync_metadata (key TEXT PRIMARY KEY NOT NULL, value TEXT)", 0)
+
+    return driver
 }
 
 /**
